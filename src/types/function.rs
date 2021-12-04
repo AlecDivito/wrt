@@ -55,14 +55,57 @@ impl<'a> Frame<'a> {
 }
 
 #[derive(Debug)]
-pub struct Function {
-    // id: u32
-    // locals: Vec<ValueType>
-    // body: Vec<Instruction>
-    id: Identifier,
+pub struct FunctionType {
     parameters: Vec<ValueType>,
-    locals: Vec<ValueType>,
     results: Vec<ValueType>,
+}
+
+impl FunctionType {
+    pub fn new() -> Self {
+        Self {
+            parameters: Vec::new(),
+            results: Vec::new(),
+        }
+    }
+
+    pub fn add_param_type(&mut self, param: Parameter) {
+        self.parameters.push(param.value().unwrap());
+    }
+
+    pub fn add_result_type(&mut self, param: Parameter) {
+        self.results.push(param.value().unwrap());
+    }
+
+    pub fn add_param(&mut self, content: String, param: Parameter) -> Result<String> {
+        let mut temp = content;
+        if let Some(old) = param.id() {
+            let new = self.parameters.len().to_string();
+            temp = temp.replace(&old, &new);
+        }
+        self.parameters.push(param.value().unwrap());
+        Ok(temp)
+    }
+
+    pub fn add_result(&mut self, content: String, param: Parameter) -> Result<String> {
+        let mut temp = content;
+        if let Some(old) = param.id() {
+            let new = self.results.len().to_string();
+            temp = temp.replace(&old, &new);
+        }
+        self.results.push(param.value().unwrap());
+        Ok(temp)
+    }
+
+    fn compare_params(&self, parameters: &[ValueType]) -> bool {
+        !ValueType::same_stack_types(&self.parameters, parameters)
+    }
+}
+
+#[derive(Debug)]
+pub struct Function {
+    id: Identifier,
+    types: FunctionType,
+    locals: Vec<ValueType>,
     instructions: Vec<Instruction>,
     export: Option<Export>,
 }
@@ -71,10 +114,9 @@ impl Function {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             id: Identifier::String(name.into()),
-            parameters: Vec::new(),
-            locals: Vec::new(),
-            results: Vec::new(),
+            types: FunctionType::new(),
             instructions: Vec::new(),
+            locals: Vec::new(),
             export: None,
         }
     }
@@ -90,26 +132,15 @@ impl Function {
         let mut content = block.content().unwrap_or("").to_string();
 
         //TODO(Alec): If there is no function name, then we still need to identify it in some way...
-        let name = block.variable_name().unwrap_or("");
+        let name = *block.variable_name().get(0).unwrap_or(&"");
         let mut func = Self::new(name);
 
         for child in block.children() {
             let param = Parameter::build(child)?;
             match param.type_id() {
-                BlockType::Parameter => {
-                    if let Some(old) = param.id() {
-                        let new = func.parameters.len().to_string();
-                        content = content.replace(&old, &new);
-                    }
-                    func.parameters.push(param.value().unwrap());
-                }
-                BlockType::Result => {
-                    if let Some(old) = param.id() {
-                        let new = func.results.len().to_string();
-                        content = content.replace(&old, &new);
-                    }
-                    func.results.push(param.value().unwrap());
-                }
+                BlockType::Parameter => content = func.types.add_param(content, param)?,
+                BlockType::Result => content = func.types.add_result(content, param)?,
+
                 BlockType::Local => {
                     if let Some(old) = param.id() {
                         let new = func.locals.len().to_string();
@@ -136,7 +167,7 @@ impl Function {
 
     pub fn frame<'a>(&'a self, parameters: &'a [ValueType]) -> Result<Frame<'a>> {
         // 1. Check if the function has the same parameters
-        if !ValueType::same_stack_types(&self.parameters, parameters) {
+        if self.types.compare_params(parameters) {
             return Err(WasmError::err(format!(
                 "can't build frame with function because improper parameters were shared"
             )));
@@ -144,7 +175,7 @@ impl Function {
         Ok(Frame {
             values: vec![],
             opcodes: &self.instructions,
-            results: &self.results,
+            results: &self.types.results,
             params: parameters.to_vec(),
             locals: &self.locals,
         })
@@ -154,7 +185,7 @@ impl Function {
         // 1. Get the parameters that needs to be passed to the function
         let mut params = vec![];
         let mut values = frame.values.iter().rev();
-        for _ in 0..self.parameters.len() {
+        for _ in 0..self.types.parameters.len() {
             params.push(
                 values
                     .next()
@@ -165,7 +196,7 @@ impl Function {
         params.reverse();
 
         // 2. Check if the call stack matches the parameters
-        if !ValueType::same_stack_types(&self.parameters, &params) {
+        if self.types.compare_params(&params) {
             return Err(WasmError::err(format!(
                 "can't build frame with function because improper parameters were shared"
             )));
@@ -175,7 +206,7 @@ impl Function {
         Ok(Frame {
             values: vec![],
             opcodes: &self.instructions,
-            results: &self.results,
+            results: &self.types.results,
             params,
             locals: &self.locals,
         })

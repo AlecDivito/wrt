@@ -37,7 +37,7 @@ impl Export {
     pub fn build(module: &Module, block: &Block) -> Result<Self> {
         if let BlockType::Export = block.type_id() {
             // we require that the export block has an identifer
-            let id = block.variable_name().ok_or(WasmError::err(format!(
+            let id = *block.variable_name().get(0).ok_or(WasmError::err(format!(
                 "exported type required an identifier. None found"
             )))?;
             // we require that the export block exports something
@@ -46,7 +46,7 @@ impl Export {
                 block.type_id()
             )))?;
             // the identifier that can be used to get the data
-            let identifier = child.variable_name().ok_or(WasmError::err(format!(
+            let identifier = *child.variable_name().get(0).ok_or(WasmError::err(format!(
                 "exported type requires an identifier, none found"
             )))?;
 

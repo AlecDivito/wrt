@@ -14,7 +14,9 @@ pub enum Identifier {
 
 pub mod export;
 pub mod function;
+pub mod import;
 pub mod instruction;
 pub mod module;
 pub mod parameter;
+pub mod types;
 pub mod value;

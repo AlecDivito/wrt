@@ -24,7 +24,10 @@ impl Parameter {
                 let content = block.content().ok_or(WasmError::err(
                     "expected argument with value, found nothing",
                 ))?;
-                let id = block.variable_name().and_then(|s| Some(s.to_string()));
+                let id = block
+                    .variable_name()
+                    .get(0)
+                    .and_then(|s| Some(s.to_string()));
                 let value = Some(ValueType::from_str(content)?);
                 Ok(Self {
                     id_type: block.type_id().clone(),
@@ -35,6 +38,7 @@ impl Parameter {
             Export => {
                 let id = block
                     .variable_name()
+                    .get(0)
                     .ok_or(WasmError::err("export parameter requires a name assigned"))?;
                 Ok(Self {
                     id_type: block.type_id().clone(),

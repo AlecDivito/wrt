@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use block::{Block, SubString};
 use types::{function::Frame, instruction::Instruction, module::Module, Identifier};
 
@@ -7,12 +9,23 @@ use crate::{
 };
 
 pub struct Instance {
-    module: Module,
+    main: Module,
+    modules: HashMap<String, Module>,
 }
 
 impl Instance {
     pub fn new(module: Module) -> Self {
-        Self { module }
+        Self {
+            main: module,
+            modules: HashMap::new(),
+        }
+    }
+
+    pub fn link(&mut self, module: Module, name: impl Into<String>) {
+        //TODO(Alec): maybe do some error checking??? but then again, i'm not
+        // sure if the module should be added right now or later but this is the
+        // implementation i've choosen so far.
+        self.modules.insert(name.into(), module);
     }
 
     pub fn execute(
@@ -21,7 +34,7 @@ impl Instance {
         parameters: &[ValueType],
     ) -> Result<Vec<ValueType>> {
         let name = name.into();
-        let export = self.module.export(&name).ok_or(WasmError::err(format!(
+        let export = self.main.export(&name).ok_or(WasmError::err(format!(
             "function name ('{}') does not exist in module",
             name
         )))?;
@@ -34,7 +47,7 @@ impl Instance {
                 name
             )))?;
 
-        let function = self.module.function(func_id).ok_or(WasmError::err(format!(
+        let function = self.main.function(func_id).ok_or(WasmError::err(format!(
             "failed to find exported function with identifier {:?}",
             func_id
         )))?;
@@ -48,9 +61,10 @@ impl Instance {
         let mut i = 0;
         while let Some(instruction) = frame.opcodes.get(i) {
             match instruction {
+                &Instruction::Return => break,
                 Instruction::Call(id) => {
                     let func_call = self
-                        .module
+                        .main
                         .function(&Identifier::String(id.to_owned()))
                         .ok_or(WasmError::err(format!(
                             "failed to find exported function with identifier {:?}",

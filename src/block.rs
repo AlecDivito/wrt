@@ -104,6 +104,13 @@ impl<'a> SubString<'a> {
         self.push_breakpoint();
     }
 
+    fn increment_latest_breakpoint(&mut self) {
+        if let Some(v) = self.pop_breakpoint() {
+            let value = v + 1;
+            self.breakpoints.push(value);
+        };
+    }
+
     fn eat_token<F: Fn(char) -> bool>(&mut self, f: F) -> Option<&'a str> {
         let mut end = self.index;
         while end < self.source.len() {
@@ -156,6 +163,7 @@ impl<'a> SubString<'a> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum BlockType {
     Module,
+    Import,
     Function,
     Export,
     Parameter,
@@ -173,6 +181,7 @@ impl Display for BlockType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let content = match self {
             BlockType::Module => "module",
+            BlockType::Import => "import",
             BlockType::Function => "function",
             BlockType::Export => "export",
             BlockType::Parameter => "param",
@@ -189,6 +198,7 @@ impl FromStr for BlockType {
     fn from_str(input: &str) -> std::result::Result<BlockType, Self::Err> {
         match input {
             "module" => Ok(BlockType::Module),
+            "import" => Ok(BlockType::Import),
             "func" => Ok(BlockType::Function),
             "export" => Ok(BlockType::Export),
             "param" => Ok(BlockType::Parameter),
@@ -205,7 +215,7 @@ impl FromStr for BlockType {
 
 pub struct Block<'a> {
     block_type: BlockType,
-    variable_name: Option<&'a str>,
+    variable_name: Vec<&'a str>,
     content: Option<&'a str>,
     children: Vec<Block<'a>>,
 }
@@ -214,7 +224,7 @@ impl<'a> Block<'a> {
     pub fn new(block_type: BlockType) -> Self {
         Self {
             block_type,
-            variable_name: None,
+            variable_name: Vec::new(),
             content: None,
             children: Vec::new(),
         }
@@ -239,28 +249,38 @@ impl<'a> Block<'a> {
             // assign this as a variable for a function
             if block.children.is_empty() && source.expect("$")? {
                 if let Some(name) = source.eat_identifier() {
-                    block.variable_name = Some(name);
+                    //TODO(Alec): Change this to use an identifier instead
+                    // it will help later on to just be explicit
+                    block.variable_name.push(name);
                 } else {
                     return Err(WasmError::new(0, 0, "Expected variable name"));
                 }
+                // source.eat();
                 source.swap_breakpoint();
             }
-
             // parse the name of the block
-            if block.children.is_empty() && source.expect("\"")? {
+            else if block.children.is_empty() && source.expect("\"")? {
                 source.eat();
                 if let Some(name) = source.eat_name() {
-                    block.variable_name = Some(name);
+                    //TODO(Alec): Change this to just be 'name' instead of 'variable_name'.
+                    // overall it mimics the documentation better.
+                    block.variable_name.push(name);
                 } else {
                     return Err(WasmError::new(0, 0, "Expected variable name for block"));
                 }
+                if !source.expect("\"")? {
+                    return Err(WasmError::err(
+                        "expected closing quotation on variable name",
+                    ));
+                }
+                source.eat();
                 source.swap_breakpoint();
             }
-
             // new block to be parsed
-            if source.expect("(")? {
+            else if source.expect("(")? {
                 let child = Block::parse(source)?;
                 block.children.push(child);
+                source.eat();
                 source.swap_breakpoint();
             } else {
                 // otherwise, keep incrementing by one
@@ -275,9 +295,7 @@ impl<'a> Block<'a> {
     pub fn walk(&self, spaces: Option<usize>) {
         let mut s = String::new();
         for i in 0..spaces.unwrap_or(0) {
-            if i != 0 {
-                s = s + " ";
-            }
+            s = format!(" {}", s);
         }
         println!("{}{}", s, self);
         for block in &self.children {
@@ -297,20 +315,23 @@ impl<'a> Block<'a> {
         self.content
     }
 
-    pub(crate) fn variable_name(&self) -> Option<&'a str> {
-        self.variable_name
+    pub(crate) fn variable_name(&self) -> &Vec<&'a str> {
+        &self.variable_name
     }
 }
 
 impl<'a> Display for Block<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut prefix = self.block_type.to_string();
-        if let Some(var) = self.variable_name {
-            prefix = format!("{} -> {}", self.block_type, var);
-        }
+        let prefix = match self.variable_name.len() {
+            0 => self.block_type.to_string(),
+            1 => format!("{} -> '{}'", self.block_type, self.variable_name[0]),
+            _ => format!("{} -> '{}'", self.block_type, self.variable_name.join(".")),
+        };
         let mut args = String::new();
         if let Some(content) = self.content {
-            args = format!("({})", content);
+            if !content.is_empty() {
+                args = format!("({})", content);
+            }
         }
         write!(f, "{} {}", prefix, args)
     }

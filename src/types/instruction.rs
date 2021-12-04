@@ -6,6 +6,7 @@ use crate::{block::SubString, error::WasmError};
 pub enum Instruction {
     // ?
     Call(String),
+    Return,
 
     // ?
     LocalGet(usize),
@@ -29,6 +30,7 @@ impl FromStr for Instruction {
                         .ok_or(WasmError::err("expected argument of function id"))?;
                     Ok(Instruction::Call(id.into()))
                 }
+                "return" => Ok(Instruction::Return),
 
                 "local.get" => {
                     let index = source

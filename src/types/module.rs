@@ -6,7 +6,7 @@ use crate::{
     Block,
 };
 
-use super::{export::Export, function::Function, Identifier};
+use super::{export::Export, function::Function, import::Import, Identifier};
 
 #[derive(Debug)]
 pub struct Module {
@@ -18,9 +18,9 @@ pub struct Module {
     // elements: Vec<Element>
     // datas: Vec<Data>
     // start: Option<Start>
-    // imports: Vec<Import>
     // exports: Vec<Export>
     functions: Vec<Function>,
+    imports: HashMap<String, HashMap<String, Import>>,
     exports: HashMap<Identifier, Export>,
 }
 
@@ -28,6 +28,7 @@ impl Module {
     pub fn new() -> Self {
         Self {
             functions: Vec::new(),
+            imports: HashMap::new(),
             exports: HashMap::new(),
         }
     }
@@ -47,6 +48,18 @@ impl Module {
                     BlockType::Export => {
                         let export = Export::build(&module, child)?;
                         module.exports.insert(export.id(), export);
+                    }
+                    BlockType::Import => {
+                        let import = Import::build(child)?;
+                        let module_name = import.module();
+                        let import_name = import.name();
+                        if let Some(module_imports) = module.imports.get_mut(&module_name) {
+                            module_imports.insert(import_name, import);
+                        } else {
+                            let mut map = HashMap::new();
+                            map.insert(import_name, import);
+                            module.imports.insert(module_name, map);
+                        }
                     }
                     _ => {
                         return Err(WasmError::new(

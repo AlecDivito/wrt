@@ -31,6 +31,18 @@ fn wasm_function_add_with_export() {
 }
 
 #[test]
+fn multi_declared_parameters_and_results_in_func() {
+    let program = r#"(module
+    (func $test (param i32 i32) (result i32 i32)
+        local.get 0
+        local.get 1
+    ) (export "test" (func $test)))"#;
+    let args = &[ValueType::I32(5), ValueType::I32(3)];
+    let res = Engine::compile_and_run(program, "test", args).unwrap();
+    assert_eq!(res, args)
+}
+
+#[test]
 fn wasm_function_add_with_export_and_weird_spacing() {
     let program = r#"(           module
      (   func   $add     (  
@@ -50,6 +62,20 @@ fn wasm_function_add_with_export_and_weird_spacing() {
 }
 
 #[test]
+fn wasm_function_sum_return_and_parameters_test() {
+    let program = r#"(module
+    (func (export "sum") (param $a i32) (param $b i32) (result i32)
+        local.get $a
+        local.get $b
+        i32.add
+        return
+    ))"#;
+    let res =
+        Engine::compile_and_run(program, "sum", &[ValueType::I32(5), ValueType::I32(6)]).unwrap();
+    assert_eq!(res, &[ValueType::I32(11)])
+}
+
+#[test]
 fn wasm_function_calls_other_function() {
     let program = r#"(module (func $getAnswer (result i32) i32.const 42)
     (func (export "getAnswerPlus1") (result i32)
@@ -60,36 +86,20 @@ fn wasm_function_calls_other_function() {
     assert_eq!(res, &[ValueType::I32(43)])
 }
 
-// #[test]
-// fn wasm_function_return_test() {
-//     let p = r#"(module
-//     (func (export "main")
-//           (result i32)
-//         i32.const 42
-//         return
-//     )
-// )"#;
-//     let engine = Engine::new();
-//     let module = engine.compile(p).unwrap();
-//     let results = engine.execute(module, "main");
-//     assert_eq!(vec![ValueType::I32(42)], results);
-// }
-
-// #[test]
-// fn wasm_function_sum_and_parameters_test() {
-//     let p = r#"(module
-//     (func (export "sum")
-//           (param $a i32)
-//           (param $b i32)
-//           (result i32)
-//         local.get $a
-//         local.get $b
-//         i32.add
-//         return
-//     )
-// )"#;
-//     let engine = Engine::new();
-//     let result = engine.compile(p).unwrap();
-//     // let results = engine.execute(engine, "main", [ValueType::I32(10), ValueType::I32(10)]);
-//     // assert_eq!(vec![ValueType::I32(20)], results);
-// }
+#[test]
+fn wasm_function_import_function() {
+    let p1 = r#"(module (func (export "getAnswer") (result i32) i32.const 42))"#;
+    let p2 = r#"(module
+        (import "lib" "getAnswer" (func $answer (result i32)))
+        (func (export "getAnswerPlus1) (result i32)
+            call $answer
+            i32.const 1
+            i32.add))"#;
+    let engine = Engine::new();
+    let m1 = engine.compile(p1).unwrap();
+    let m2 = engine.compile(p2).unwrap();
+    // m2.link(m1, "lib").unwrap();
+    // let instance = engine.instantiate(m2);
+    // let res = instance.execute("getAnswerPlus1", &[]).unwrap();
+    // assert_eq!(res, &[ValueType::I32(43)])
+}
