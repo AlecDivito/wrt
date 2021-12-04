@@ -1,9 +1,5 @@
 use block::{Block, SubString};
-use types::{
-    export::ExportType,
-    instruction::{self, Instruction},
-    module::Module,
-};
+use types::{function::Frame, instruction::Instruction, module::Module, Identifier};
 
 use crate::{
     error::{Result, WasmError},
@@ -22,7 +18,7 @@ impl Instance {
     pub fn execute(
         &self,
         name: impl Into<String>,
-        arguments: &[ValueType],
+        parameters: &[ValueType],
     ) -> Result<Vec<ValueType>> {
         let name = name.into();
         let export = self.module.export(&name).ok_or(WasmError::err(format!(
@@ -30,38 +26,54 @@ impl Instance {
             name
         )))?;
 
-        let function = if let ExportType::Function(func_id) = export.export_type() {
-            //TODO(Alec): This .ok_or() probably won't ever be triggered. The
-            // reason is because when we build the export class, we already do
-            // this check during compilation.
-            self.module.function(func_id).ok_or(WasmError::err(format!(
-                "failed to find exported function with identifier {:?}",
-                func_id
-            )))?
-        } else {
-            return Err(WasmError::err(format!(
+        let func_id = export
+            .export_type()
+            .function_id()
+            .ok_or(WasmError::err(format!(
                 "failed to find exported function {} in program",
                 name
-            )));
-        };
+            )))?;
 
-        let mut frame = function.frame(arguments)?;
+        let function = self.module.function(func_id).ok_or(WasmError::err(format!(
+            "failed to find exported function with identifier {:?}",
+            func_id
+        )))?;
 
+        let frame = function.frame(parameters)?;
+
+        self.run_frame(frame)
+    }
+
+    fn run_frame(&self, mut frame: Frame) -> Result<Vec<ValueType>> {
         let mut i = 0;
         while let Some(instruction) = frame.opcodes.get(i) {
             match instruction {
-                Instruction::LocalGet(index) => {
-                    frame.push_param(index)?;
+                Instruction::Call(id) => {
+                    let func_call = self
+                        .module
+                        .function(&Identifier::String(id.to_owned()))
+                        .ok_or(WasmError::err(format!(
+                            "failed to find exported function with identifier {:?}",
+                            id
+                        )))?;
+                    let new_frame = func_call.from_frame(&frame)?;
+                    let call_result = self.run_frame(new_frame)?;
+                    for value in call_result {
+                        frame.push(value)
+                    }
                 }
+
+                Instruction::LocalGet(index) => frame.push_param(index)?,
+
                 Instruction::I32Add => {
                     let v1 = frame.pop().ok_or(WasmError::err("Stack overflow"))?;
                     let v2 = frame.pop().ok_or(WasmError::err("Stack overflow"))?;
                     frame.push(v1.add(v2)?);
                 }
+                Instruction::I32Const(int) => frame.push(ValueType::I32(*int)),
             }
             i = i + 1;
         }
-
         frame.set_result()
     }
 }
@@ -89,10 +101,6 @@ impl Engine {
 
     pub fn instantiate(&self, module: Module) -> Instance {
         Instance::new(module)
-    }
-
-    pub fn execute(&self, module: Module, func: impl Into<String>) -> Vec<ValueType> {
-        vec![ValueType::I32(0)]
     }
 }
 

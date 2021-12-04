@@ -1,20 +1,12 @@
 use wrt::{types::value::ValueType, Engine};
 fn main() {
     let program = r#"(module
-        (func $add (param $lhs i32) (param $rhs i32) (result i32)
-            local.get $lhs
-            local.get $rhs
-            i32.add
-        )
-        (export "add" (func $add))
-    )"#;
-    let engine = Engine::new();
-    let module = engine.compile(program).unwrap();
-    let instance = engine.instantiate(module);
-    println!(
-        "{:?}",
-        instance
-            .execute("add", &[ValueType::I32(5), ValueType::I32(3)])
-            .unwrap()
-    )
+        (func $getAnswer (result i32) i32.const 42)
+        (func (export "getAnswerPlus1") (result i32)
+            call $getAnswer
+            i32.const 1
+            i32.add))"#;
+    let res = Engine::compile_and_run(program, "getAnswerPlus1", &[]).unwrap();
+
+    println!("{:?}", res)
 }

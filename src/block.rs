@@ -243,7 +243,6 @@ impl<'a> Block<'a> {
                 } else {
                     return Err(WasmError::new(0, 0, "Expected variable name"));
                 }
-                source.eat();
                 source.swap_breakpoint();
             }
 
@@ -252,7 +251,6 @@ impl<'a> Block<'a> {
                 source.eat();
                 if let Some(name) = source.eat_name() {
                     block.variable_name = Some(name);
-                    source.eat();
                 } else {
                     return Err(WasmError::new(0, 0, "Expected variable name for block"));
                 }

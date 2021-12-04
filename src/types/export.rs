@@ -4,11 +4,20 @@ use crate::{
     Block,
 };
 
-use super::{module::Module, Identifier};
+use super::{module::Module, parameter::Parameter, Identifier};
 
 #[derive(Debug)]
 pub enum ExportType {
     Function(Identifier),
+}
+
+impl ExportType {
+    pub fn function_id(&self) -> Option<&Identifier> {
+        match self {
+            ExportType::Function(id) => Some(id),
+            // _ => None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -18,6 +27,13 @@ pub struct Export {
 }
 
 impl Export {
+    pub fn make_function_export(param: Parameter, func_id: Identifier) -> Export {
+        Self {
+            id: Identifier::String(param.id().unwrap()),
+            export: ExportType::Function(func_id),
+        }
+    }
+
     pub fn build(module: &Module, block: &Block) -> Result<Self> {
         if let BlockType::Export = block.type_id() {
             // we require that the export block has an identifer
@@ -29,7 +45,7 @@ impl Export {
                 "expected module, found {}",
                 block.type_id()
             )))?;
-
+            // the identifier that can be used to get the data
             let identifier = child.variable_name().ok_or(WasmError::err(format!(
                 "exported type requires an identifier, none found"
             )))?;
@@ -63,5 +79,9 @@ impl Export {
 
     pub fn export_type(&self) -> &ExportType {
         &self.export
+    }
+
+    pub(crate) fn id(&self) -> Identifier {
+        self.id.clone()
     }
 }

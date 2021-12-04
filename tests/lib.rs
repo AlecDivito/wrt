@@ -24,8 +24,7 @@ fn wasm_function_add_with_export() {
         local.get $rhs
         i32.add
     )
-    (export "add" (func $add))
-)"#;
+    (export "add" (func $add)))"#;
     let res =
         Engine::compile_and_run(program, "add", &[ValueType::I32(5), ValueType::I32(3)]).unwrap();
     assert_eq!(res, &[ValueType::I32(8)])
@@ -48,6 +47,17 @@ fn wasm_function_add_with_export_and_weird_spacing() {
     let res =
         Engine::compile_and_run(program, "add", &[ValueType::I32(5), ValueType::I32(3)]).unwrap();
     assert_eq!(res, &[ValueType::I32(8)])
+}
+
+#[test]
+fn wasm_function_calls_other_function() {
+    let program = r#"(module (func $getAnswer (result i32) i32.const 42)
+    (func (export "getAnswerPlus1") (result i32)
+    call $getAnswer
+    i32.const 1
+    i32.add))"#;
+    let res = Engine::compile_and_run(program, "getAnswerPlus1", &[]).unwrap();
+    assert_eq!(res, &[ValueType::I32(43)])
 }
 
 // #[test]

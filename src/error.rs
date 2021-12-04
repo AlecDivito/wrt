@@ -1,4 +1,4 @@
-use std::{error::Error, fmt::Display, num::ParseIntError, str::FromStr};
+use std::{error::Error, fmt::Display, num::ParseIntError};
 
 #[derive(Debug)]
 pub struct WasmError {

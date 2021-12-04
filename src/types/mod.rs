@@ -6,7 +6,7 @@ trait Buildable {
     fn build(block: &Block) -> Self;
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum Identifier {
     String(String),
     Number(usize),

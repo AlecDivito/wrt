@@ -21,7 +21,7 @@ pub struct Module {
     // imports: Vec<Import>
     // exports: Vec<Export>
     functions: Vec<Function>,
-    exports: HashMap<String, Export>,
+    exports: HashMap<Identifier, Export>,
 }
 
 impl Module {
@@ -38,13 +38,15 @@ impl Module {
             for child in block.children() {
                 match child.type_id() {
                     BlockType::Function => {
-                        module.functions.push(Function::build(child)?);
+                        let mut func = Function::build(child)?;
+                        if let Some(export) = func.take_export() {
+                            module.exports.insert(export.id(), export);
+                        }
+                        module.functions.push(func);
                     }
                     BlockType::Export => {
                         let export = Export::build(&module, child)?;
-                        module
-                            .exports
-                            .insert(child.variable_name().as_ref().unwrap().to_string(), export);
+                        module.exports.insert(export.id(), export);
                     }
                     _ => {
                         return Err(WasmError::new(
@@ -74,7 +76,7 @@ impl Module {
         None
     }
 
-    pub fn export(&self, name: &str) -> Option<&Export> {
-        self.exports.get(name)
+    pub fn export(&self, name: impl Into<String>) -> Option<&Export> {
+        self.exports.get(&Identifier::String(name.into()))
     }
 }

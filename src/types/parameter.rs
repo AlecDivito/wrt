@@ -11,37 +11,42 @@ use super::value::ValueType;
 #[derive(Debug)]
 pub struct Parameter {
     id_type: BlockType,
-    value: ValueType,
-    name: Option<String>,
+    value: Option<ValueType>,
+    id: Option<String>,
 }
 
 impl Parameter {
     pub fn build(block: &Block) -> Result<Parameter> {
-        let allowed_blocks = [BlockType::Parameter, BlockType::Result, BlockType::Local];
-        if allowed_blocks.contains(block.type_id()) {
-            if let Some(content) = block.content() {
-                let name = if let Some(s) = block.variable_name() {
-                    Some(s.to_string())
-                } else {
-                    None
-                };
-                let value = ValueType::from_str(content)?;
+        use BlockType::*;
+
+        match block.type_id() {
+            Parameter | Local | Result => {
+                let content = block.content().ok_or(WasmError::err(
+                    "expected argument with value, found nothing",
+                ))?;
+                let id = block.variable_name().and_then(|s| Some(s.to_string()));
+                let value = Some(ValueType::from_str(content)?);
                 Ok(Self {
                     id_type: block.type_id().clone(),
-                    name,
+                    id,
                     value,
                 })
-            } else {
-                Err(WasmError::err(format!(
-                    "expected argument describing value, nothing instead"
-                )))
             }
-        } else {
-            Err(WasmError::err(format!(
+            Export => {
+                let id = block
+                    .variable_name()
+                    .ok_or(WasmError::err("export parameter requires a name assigned"))?;
+                Ok(Self {
+                    id_type: block.type_id().clone(),
+                    value: None,
+                    id: Some(id.to_string()),
+                })
+            }
+            _ => Err(WasmError::err(format!(
                 "expected block types of {:?}, found {}",
-                allowed_blocks,
+                &[Parameter, Local, Result, Export],
                 block.type_id()
-            )))
+            ))),
         }
     }
 
@@ -49,11 +54,11 @@ impl Parameter {
         self.id_type.clone()
     }
 
-    pub fn name(&self) -> Option<String> {
-        self.name.clone()
+    pub fn id(&self) -> Option<String> {
+        self.id.clone()
     }
 
-    pub fn value(&self) -> ValueType {
+    pub fn value(&self) -> Option<ValueType> {
         self.value.clone()
     }
 }

@@ -6,13 +6,15 @@ use crate::{
     Block,
 };
 
-use super::{instruction::Instruction, parameter::Parameter, value::ValueType, Identifier};
+use super::{
+    export::Export, instruction::Instruction, parameter::Parameter, value::ValueType, Identifier,
+};
 
 #[derive(Debug)]
 pub struct Frame<'a> {
     pub opcodes: &'a [Instruction],
     values: Vec<ValueType>,
-    params: &'a [ValueType],
+    params: Vec<ValueType>,
     results: &'a [ValueType],
     locals: &'a [ValueType],
 }
@@ -62,6 +64,7 @@ pub struct Function {
     locals: Vec<ValueType>,
     results: Vec<ValueType>,
     instructions: Vec<Instruction>,
+    export: Option<Export>,
 }
 
 impl Function {
@@ -72,6 +75,7 @@ impl Function {
             locals: Vec::new(),
             results: Vec::new(),
             instructions: Vec::new(),
+            export: None,
         }
     }
 
@@ -93,25 +97,31 @@ impl Function {
             let param = Parameter::build(child)?;
             match param.type_id() {
                 BlockType::Parameter => {
-                    if let Some(old) = param.name() {
+                    if let Some(old) = param.id() {
                         let new = func.parameters.len().to_string();
                         content = content.replace(&old, &new);
                     }
-                    func.parameters.push(param.value());
+                    func.parameters.push(param.value().unwrap());
                 }
                 BlockType::Result => {
-                    if let Some(old) = param.name() {
+                    if let Some(old) = param.id() {
                         let new = func.results.len().to_string();
                         content = content.replace(&old, &new);
                     }
-                    func.results.push(param.value());
+                    func.results.push(param.value().unwrap());
                 }
                 BlockType::Local => {
-                    if let Some(old) = param.name() {
+                    if let Some(old) = param.id() {
                         let new = func.locals.len().to_string();
                         content = content.replace(&old, &new);
                     }
-                    func.locals.push(param.value());
+                    func.locals.push(param.value().unwrap());
+                }
+                BlockType::Export => {
+                    if func.export.is_some() {
+                        return Err(WasmError::err("can not export function more then once"));
+                    }
+                    func.export = Some(Export::make_function_export(param, func.id.clone()))
                 }
                 _ => {
                     panic!("This should neven execute as we already check the type when we build the parameter");
@@ -135,12 +145,47 @@ impl Function {
             values: vec![],
             opcodes: &self.instructions,
             results: &self.results,
-            params: parameters,
+            params: parameters.to_vec(),
+            locals: &self.locals,
+        })
+    }
+
+    pub fn from_frame<'a>(&'a self, frame: &'a Frame) -> Result<Frame<'a>> {
+        // 1. Get the parameters that needs to be passed to the function
+        let mut params = vec![];
+        let mut values = frame.values.iter().rev();
+        for _ in 0..self.parameters.len() {
+            params.push(
+                values
+                    .next()
+                    .ok_or(WasmError::err("Expected more items to fit on stack"))?
+                    .clone(),
+            );
+        }
+        params.reverse();
+
+        // 2. Check if the call stack matches the parameters
+        if !ValueType::same_stack_types(&self.parameters, &params) {
+            return Err(WasmError::err(format!(
+                "can't build frame with function because improper parameters were shared"
+            )));
+        }
+
+        // 3. Create the frame
+        Ok(Frame {
+            values: vec![],
+            opcodes: &self.instructions,
+            results: &self.results,
+            params,
             locals: &self.locals,
         })
     }
 
     pub fn identifier(&self) -> Identifier {
         self.id.clone()
+    }
+
+    pub fn take_export(&mut self) -> Option<Export> {
+        self.export.take()
     }
 }
