@@ -70,7 +70,7 @@ impl Instance {
                             "failed to find exported function with identifier {:?}",
                             id
                         )))?;
-                    let new_frame = func_call.from_frame(&frame)?;
+                    let new_frame = func_call.from_frame(&frame, &self.modules)?;
                     let call_result = self.run_frame(new_frame)?;
                     for value in call_result {
                         frame.push(value)

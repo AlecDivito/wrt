@@ -11,7 +11,7 @@ use super::value::ValueType;
 #[derive(Debug)]
 pub struct Parameter {
     id_type: BlockType,
-    value: Option<ValueType>,
+    value: Vec<ValueType>,
     id: Option<String>,
 }
 
@@ -28,7 +28,10 @@ impl Parameter {
                     .variable_name()
                     .get(0)
                     .and_then(|s| Some(s.to_string()));
-                let value = Some(ValueType::from_str(content)?);
+                let value = content
+                    .split_whitespace()
+                    .map(ValueType::from_str)
+                    .collect::<crate::error::Result<Vec<ValueType>>>()?;
                 Ok(Self {
                     id_type: block.type_id().clone(),
                     id,
@@ -42,7 +45,7 @@ impl Parameter {
                     .ok_or(WasmError::err("export parameter requires a name assigned"))?;
                 Ok(Self {
                     id_type: block.type_id().clone(),
-                    value: None,
+                    value: vec![],
                     id: Some(id.to_string()),
                 })
             }
@@ -62,7 +65,7 @@ impl Parameter {
         self.id.clone()
     }
 
-    pub fn value(&self) -> Option<ValueType> {
-        self.value.clone()
+    pub fn value(&mut self) -> &mut Vec<ValueType> {
+        &mut self.value
     }
 }

@@ -6,7 +6,12 @@ use crate::{
     Block,
 };
 
-use super::{export::Export, function::Function, import::Import, Identifier};
+use super::{
+    export::Export,
+    function::Function,
+    import::{Import, ImportDefinition},
+    Identifier,
+};
 
 #[derive(Debug)]
 pub struct Module {
@@ -20,7 +25,6 @@ pub struct Module {
     // start: Option<Start>
     // exports: Vec<Export>
     functions: Vec<Function>,
-    imports: HashMap<String, HashMap<String, Import>>,
     exports: HashMap<Identifier, Export>,
 }
 
@@ -28,7 +32,6 @@ impl Module {
     pub fn new() -> Self {
         Self {
             functions: Vec::new(),
-            imports: HashMap::new(),
             exports: HashMap::new(),
         }
     }
@@ -39,7 +42,7 @@ impl Module {
             for child in block.children() {
                 match child.type_id() {
                     BlockType::Function => {
-                        let mut func = Function::build(child)?;
+                        let mut func = Function::impl_block(child)?;
                         if let Some(export) = func.take_export() {
                             module.exports.insert(export.id(), export);
                         }
@@ -49,18 +52,9 @@ impl Module {
                         let export = Export::build(&module, child)?;
                         module.exports.insert(export.id(), export);
                     }
-                    BlockType::Import => {
-                        let import = Import::build(child)?;
-                        let module_name = import.module();
-                        let import_name = import.name();
-                        if let Some(module_imports) = module.imports.get_mut(&module_name) {
-                            module_imports.insert(import_name, import);
-                        } else {
-                            let mut map = HashMap::new();
-                            map.insert(import_name, import);
-                            module.imports.insert(module_name, map);
-                        }
-                    }
+                    BlockType::Import => match Import::build(child)? {
+                        ImportDefinition::Function(f) => module.functions.push(f),
+                    },
                     _ => {
                         return Err(WasmError::new(
                             0,

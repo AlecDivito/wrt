@@ -3,23 +3,21 @@ use crate::{
     error::{Result, WasmError},
 };
 
-use super::{function::FunctionType, parameter::Parameter, Identifier};
+use super::function::Function;
 
 #[derive(Debug)]
-pub enum ImportType {
-    Function(FunctionType),
+pub enum ImportDefinition {
+    Function(Function),
 }
 
 #[derive(Debug)]
 pub struct Import {
     module: String,
     name: String,
-    import_type_id: Identifier,
-    import_type: ImportType,
 }
 
 impl Import {
-    pub fn build(block: &Block) -> Result<Import> {
+    pub fn build(block: &Block) -> Result<ImportDefinition> {
         if BlockType::Import != *block.type_id() {
             return Err(WasmError::err(format!(
                 "expected import, found {}",
@@ -30,59 +28,35 @@ impl Import {
         let names = block.variable_name();
         let module = names
             .get(0)
-            .ok_or(WasmError::err("module name not found in import"))?;
-
+            .ok_or(WasmError::err("module name not found in import"))?
+            .to_string();
         let name = names
             .get(1)
-            .ok_or(WasmError::err("module item name not found in import"))?;
+            .ok_or(WasmError::err("module item name not found in import"))?
+            .to_string();
+        let import = Self { module, name };
 
         //TODO(Alec): Assuming there is only one import
         let child = block.children().get(0).ok_or(WasmError::err(
             "exported import block to include a definition",
         ))?;
 
-        let import_type_id =
-            Identifier::String(child.variable_name().get(0).unwrap_or(&"").to_string());
-
-        let import_type = match child.type_id() {
-            BlockType::Function => {
-                let mut func = FunctionType::new();
-                for arg in child.children() {
-                    let param = Parameter::build(arg)?;
-                    match arg.type_id() {
-                        BlockType::Parameter => func.add_param_type(param),
-                        BlockType::Result => func.add_result_type(param),
-                        _ => {
-                            return Err(WasmError::err(format!(
-                                "block {} is not supported in imported functions types",
-                                child.type_id()
-                            )))
-                        }
-                    }
-                }
-                ImportType::Function(func)
-            }
-            _ => {
-                return Err(WasmError::err(format!(
-                    "block {} is not supported in imports",
-                    child.type_id()
-                )))
-            }
-        };
-
-        Ok(Self {
-            module: module.to_string(),
-            name: name.to_string(),
-            import_type_id,
-            import_type,
-        })
+        match child.type_id() {
+            BlockType::Function => Ok(ImportDefinition::Function(Function::import_block(
+                child, import,
+            )?)),
+            _ => Err(WasmError::err(format!(
+                "block {} is not supported in imports",
+                child.type_id()
+            ))),
+        }
     }
 
-    pub(crate) fn module(&self) -> String {
-        self.module.clone()
+    pub fn module(&self) -> &str {
+        &self.module
     }
 
-    pub(crate) fn name(&self) -> String {
-        self.name.clone()
+    pub fn name(&self) -> &str {
+        &self.name
     }
 }

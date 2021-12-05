@@ -14,5 +14,5 @@ fn main() {
     instance.link(m1, "lib");
     let res = instance.execute("getAnswerPlus1", &[]).unwrap();
     // assert_eq!(res, &[ValueType::I32(43)])
-    // println!("{:?}", res)
+    println!("{:?}", res)
 }

@@ -84,7 +84,6 @@ impl<'a> SubString<'a> {
                 return None;
             }
             let content = self.source[start..self.index].trim();
-            self.eat();
             Some(content)
         } else {
             None
@@ -102,13 +101,6 @@ impl<'a> SubString<'a> {
     pub fn swap_breakpoint(&mut self) {
         self.pop_breakpoint();
         self.push_breakpoint();
-    }
-
-    fn increment_latest_breakpoint(&mut self) {
-        if let Some(v) = self.pop_breakpoint() {
-            let value = v + 1;
-            self.breakpoints.push(value);
-        };
     }
 
     fn eat_token<F: Fn(char) -> bool>(&mut self, f: F) -> Option<&'a str> {
@@ -255,7 +247,6 @@ impl<'a> Block<'a> {
                 } else {
                     return Err(WasmError::new(0, 0, "Expected variable name"));
                 }
-                // source.eat();
                 source.swap_breakpoint();
             }
             // parse the name of the block
@@ -294,7 +285,7 @@ impl<'a> Block<'a> {
 
     pub fn walk(&self, spaces: Option<usize>) {
         let mut s = String::new();
-        for i in 0..spaces.unwrap_or(0) {
+        for _ in 0..spaces.unwrap_or(0) {
             s = format!(" {}", s);
         }
         println!("{}{}", s, self);

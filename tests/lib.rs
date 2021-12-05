@@ -34,8 +34,8 @@ fn wasm_function_add_with_export() {
 fn multi_declared_parameters_and_results_in_func() {
     let program = r#"(module
     (func $test (param i32 i32) (result i32 i32)
-        local.get 0
         local.get 1
+        local.get 0
     ) (export "test" (func $test)))"#;
     let args = &[ValueType::I32(5), ValueType::I32(3)];
     let res = Engine::compile_and_run(program, "test", args).unwrap();
@@ -91,15 +91,15 @@ fn wasm_function_import_function() {
     let p1 = r#"(module (func (export "getAnswer") (result i32) i32.const 42))"#;
     let p2 = r#"(module
         (import "lib" "getAnswer" (func $answer (result i32)))
-        (func (export "getAnswerPlus1) (result i32)
+        (func (export "getAnswerPlus1") (result i32)
             call $answer
             i32.const 1
             i32.add))"#;
     let engine = Engine::new();
     let m1 = engine.compile(p1).unwrap();
     let m2 = engine.compile(p2).unwrap();
-    // m2.link(m1, "lib").unwrap();
-    // let instance = engine.instantiate(m2);
-    // let res = instance.execute("getAnswerPlus1", &[]).unwrap();
-    // assert_eq!(res, &[ValueType::I32(43)])
+    let mut instance = engine.instantiate(m2);
+    instance.link(m1, "lib");
+    let res = instance.execute("getAnswerPlus1", &[]).unwrap();
+    assert_eq!(res, &[ValueType::I32(43)])
 }
