@@ -6,27 +6,35 @@ use crate::{
 
 use super::{module::Module, parameter::Parameter, Identifier};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ExportType {
     Function(Identifier),
+    Global(Identifier),
 }
 
 impl ExportType {
     pub fn function_id(&self) -> Option<&Identifier> {
         match self {
             ExportType::Function(id) => Some(id),
-            // _ => None,
+            ExportType::Global(id) => Some(id),
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Export {
     id: Identifier,
     export: ExportType,
 }
 
 impl Export {
+    pub fn make_global_export(id: Identifier, global_id: &Identifier) -> Export {
+        Self {
+            id,
+            export: ExportType::Global(global_id.clone()),
+        }
+    }
+
     pub fn make_function_export(param: Parameter, func_id: Identifier) -> Export {
         Self {
             id: Identifier::String(param.id().unwrap()),
@@ -63,6 +71,9 @@ impl Export {
                             identifier
                         )))
                     }
+                }
+                BlockType::Global => {
+                    todo!("Fully implementing the global class before I support this")
                 }
                 _ => Err(WasmError::err(format!(
                     "support for exporting type {} is not currently supported",

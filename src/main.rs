@@ -1,12 +1,16 @@
 use wrt::{types::value::ValueType, Engine};
 fn main() {
-    let p1 = r#"(module (func (export "getAnswer") (result i32) i32.const 42))"#;
-    let p2 = r#"(module
-        (import "lib" "getAnswer" (func $answer (result i32)))
-        (func (export "getAnswerPlus1") (result i32)
-            call $answer
+    let p2 = r#"(module (global $global (export "global") (mut i32) 42))"#;
+    let p1 = r#"(module
+        (global $g (import "js" "global") (mut i32))
+        (func (export "getGlobal") (result i32)
+             (global.get $g))
+        (func (export "incGlobal")
+            global.set $g
+            global.get $g
             i32.const 1
-            i32.add))"#;
+            i32.add)
+    )"#;
     let engine = Engine::new();
     let m1 = engine.compile(p1).unwrap();
     let m2 = engine.compile(p2).unwrap();

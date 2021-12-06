@@ -1,9 +1,13 @@
+use core::panic;
 use std::{
     fmt::Display,
     str::{FromStr, SplitWhitespace},
 };
 
-use crate::error::{Result, WasmError};
+use crate::{
+    error::{Result, WasmError},
+    types::Identifier,
+};
 
 pub struct SubString<'a> {
     index: usize,
@@ -155,12 +159,14 @@ impl<'a> SubString<'a> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum BlockType {
     Module,
+    Global,
     Import,
-    Function,
     Export,
+    Function,
     Parameter,
     Result,
     Local,
+    Mut, // this is a special block
 }
 
 impl BlockType {
@@ -173,12 +179,14 @@ impl Display for BlockType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let content = match self {
             BlockType::Module => "module",
+            BlockType::Global => "global",
             BlockType::Import => "import",
-            BlockType::Function => "function",
             BlockType::Export => "export",
+            BlockType::Function => "function",
             BlockType::Parameter => "param",
             BlockType::Result => "result",
             BlockType::Local => "local",
+            BlockType::Mut => "mut",
         };
         write!(f, "{}", content)
     }
@@ -190,12 +198,14 @@ impl FromStr for BlockType {
     fn from_str(input: &str) -> std::result::Result<BlockType, Self::Err> {
         match input {
             "module" => Ok(BlockType::Module),
+            "global" => Ok(BlockType::Global),
             "import" => Ok(BlockType::Import),
-            "func" => Ok(BlockType::Function),
             "export" => Ok(BlockType::Export),
+            "func" => Ok(BlockType::Function),
             "param" => Ok(BlockType::Parameter),
             "result" => Ok(BlockType::Result),
             "local" => Ok(BlockType::Local),
+            "mut" => Ok(BlockType::Mut),
             _ => Err(WasmError::new(
                 0,
                 0,
@@ -308,6 +318,16 @@ impl<'a> Block<'a> {
 
     pub(crate) fn variable_name(&self) -> &Vec<&'a str> {
         &self.variable_name
+    }
+
+    pub(crate) fn identity(&self) -> Result<crate::types::Identifier> {
+        if self.variable_name.len() != 1 {
+            Err(WasmError::err("only one identifer can be used"))
+        } else if let Some(id) = self.variable_name.get(0) {
+            Ok(Identifier::String(id.to_string()))
+        } else {
+            panic!("This should never trigger :/")
+        }
     }
 }
 

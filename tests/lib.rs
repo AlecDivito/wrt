@@ -87,14 +87,18 @@ fn wasm_function_calls_other_function() {
 }
 
 #[test]
-fn wasm_function_import_function() {
-    let p1 = r#"(module (func (export "getAnswer") (result i32) i32.const 42))"#;
-    let p2 = r#"(module
-        (import "lib" "getAnswer" (func $answer (result i32)))
-        (func (export "getAnswerPlus1") (result i32)
-            call $answer
+fn global_import_export() {
+    let p2 = r#"(module (global $global (export "global") (mut i32)) 42)"#;
+    let p1 = r#"(module
+        (global $g (import "js" "global") (mut i32))
+        (func (export "getGlobal") (result i32)
+             (global.get $g))
+        (func (export "incGlobal")
+            global.set $g
+            global.get $g
             i32.const 1
-            i32.add))"#;
+            i32.add)
+    )"#;
     let engine = Engine::new();
     let m1 = engine.compile(p1).unwrap();
     let m2 = engine.compile(p2).unwrap();
@@ -103,3 +107,6 @@ fn wasm_function_import_function() {
     let res = instance.execute("getAnswerPlus1", &[]).unwrap();
     assert_eq!(res, &[ValueType::I32(43)])
 }
+
+mod global;
+mod import;
