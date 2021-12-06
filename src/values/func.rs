@@ -2,18 +2,18 @@ use std::{convert::TryFrom, fmt::Display};
 
 use crate::{
     block::{Block, BlockType},
-    error::WasmError,
+    error::{Result, WasmError},
 };
 
 use super::value::ValueType;
 
 #[derive(Debug)]
-pub struct Param {
+pub struct FuncParam {
     id: Option<String>,
     value_type: Vec<ValueType>,
 }
 
-impl<'a> TryFrom<&Block<'a>> for Param {
+impl<'a> TryFrom<&Block<'a>> for FuncParam {
     type Error = WasmError;
 
     fn try_from(block: &Block<'a>) -> std::result::Result<Self, Self::Error> {
@@ -27,7 +27,7 @@ impl<'a> TryFrom<&Block<'a>> for Param {
     }
 }
 
-impl Display for Param {
+impl Display for FuncParam {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let content = if self.value_type.len() == 1 {
             let value_type = self.value_type.pop().unwrap().type_id_string();
@@ -48,11 +48,11 @@ impl Display for Param {
 }
 
 #[derive(Debug)]
-pub struct Result {
+pub struct FuncResult {
     value_type: Vec<ValueType>,
 }
 
-impl<'a> TryFrom<&Block<'a>> for Result {
+impl<'a> TryFrom<&Block<'a>> for FuncResult {
     type Error = WasmError;
 
     fn try_from(block: &Block<'a>) -> std::result::Result<Self, Self::Error> {
@@ -62,7 +62,7 @@ impl<'a> TryFrom<&Block<'a>> for Result {
     }
 }
 
-impl Display for Result {
+impl Display for FuncResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let types = self
             .value_type
@@ -76,19 +76,39 @@ impl Display for Result {
 
 #[derive(Debug)]
 pub struct FunctionType {
-    parameters: Vec<Param>,
-    results: Vec<Result>,
+    parameters: Vec<FuncParam>,
+    results: Vec<FuncResult>,
 }
 
 impl FunctionType {
     /// Get a reference to the function type's results.
-    pub fn results(&self) -> &[Result] {
+    pub fn results(&self) -> &[FuncResult] {
         self.results.as_ref()
     }
 
     /// Get a reference to the function type's parameters.
-    pub fn parameters(&self) -> &[Param] {
+    pub fn parameters(&self) -> &[FuncParam] {
         self.parameters.as_ref()
+    }
+
+    pub fn try_from_block_allowing_other_children<'a>(block: &Block<'a>) -> Result<Self> {
+        block.expect(BlockType::Function)?;
+
+        let mut parameters = Vec::new();
+        let mut results = Vec::new();
+
+        for child in block.children() {
+            match child.type_id() {
+                BlockType::Parameter => parameters.push(FuncParam::try_from(child)?),
+                BlockType::Result => results.push(FuncResult::try_from(child)?),
+                _ => continue,
+            }
+        }
+
+        Ok(Self {
+            parameters,
+            results,
+        })
     }
 }
 
@@ -103,8 +123,8 @@ impl<'a> TryFrom<&Block<'a>> for FunctionType {
 
         for child in block.children() {
             match child.type_id() {
-                BlockType::Parameter => parameters.push(Param::try_from(child)?),
-                BlockType::Result => results.push(Result::try_from(child)?),
+                BlockType::Parameter => parameters.push(FuncParam::try_from(child)?),
+                BlockType::Result => results.push(FuncResult::try_from(child)?),
                 _ => {
                     return Err(WasmError::expected(
                         &[BlockType::Parameter, BlockType::Result],

@@ -340,10 +340,24 @@ impl<'a> Block<'a> {
             .collect::<Result<Vec<ValueType>>>()
     }
 
+    pub(crate) fn names(&self) -> Result<&[&str]> {
+        Ok(&self.variable_name)
+    }
+
     pub(crate) fn try_identity(&self) -> Result<Option<String>> {
         match self.variable_name.len() {
             0 => Ok(None),
-            1 => Ok(self.variable_name.get(0).clone().map(|s| s.to_string())),
+            1 => {
+                if let Some(id) = self.variable_name.get(0).map(|s| s.to_string()) {
+                    if id.starts_with("$") {
+                        Ok(Some(id))
+                    } else {
+                        Err(WasmError::err("expected identifier, found something else"))
+                    }
+                } else {
+                    Ok(None)
+                }
+            }
             _ => Err(WasmError::err("tried to find idenity, found to many")),
         }
     }
