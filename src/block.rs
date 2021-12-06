@@ -7,6 +7,7 @@ use std::{
 use crate::{
     error::{Result, WasmError},
     types::Identifier,
+    values::value::ValueType,
 };
 
 pub struct SubString<'a> {
@@ -33,7 +34,10 @@ impl<'a> SubString<'a> {
         if self.index <= self.source.len() {
             Ok(self.source[self.index..].starts_with(source))
         } else {
-            Err(WasmError::new(0, self.index, "reached EOF"))
+            //TODO(Alec): Change this so that we convert the sub string into the
+            // error. We want to utilize the substring class to create a more
+            // detail error.
+            Err(WasmError::err("reached EOF"))
         }
     }
 
@@ -166,6 +170,7 @@ pub enum BlockType {
     Parameter,
     Result,
     Local,
+    Type,
     Mut, // this is a special block
 }
 
@@ -186,6 +191,7 @@ impl Display for BlockType {
             BlockType::Parameter => "param",
             BlockType::Result => "result",
             BlockType::Local => "local",
+            BlockType::Type => "type",
             BlockType::Mut => "mut",
         };
         write!(f, "{}", content)
@@ -205,12 +211,9 @@ impl FromStr for BlockType {
             "param" => Ok(BlockType::Parameter),
             "result" => Ok(BlockType::Result),
             "local" => Ok(BlockType::Local),
+            "type" => Ok(BlockType::Type),
             "mut" => Ok(BlockType::Mut),
-            _ => Err(WasmError::new(
-                0,
-                0,
-                format!("type {} was unexpected", input),
-            )),
+            _ => Err(WasmError::err(format!("type {} was unexpected", input))),
         }
     }
 }
@@ -237,7 +240,7 @@ impl<'a> Block<'a> {
         if source.expect("(")? {
             source.eat();
         } else {
-            return Err(WasmError::new(0, 0, "Reached EOF"));
+            return Err(WasmError::err("Reached EOF"));
         }
 
         // get the type of block
@@ -255,7 +258,7 @@ impl<'a> Block<'a> {
                     // it will help later on to just be explicit
                     block.variable_name.push(name);
                 } else {
-                    return Err(WasmError::new(0, 0, "Expected variable name"));
+                    return Err(WasmError::err("Expected variable name"));
                 }
                 source.swap_breakpoint();
             }
@@ -267,7 +270,7 @@ impl<'a> Block<'a> {
                     // overall it mimics the documentation better.
                     block.variable_name.push(name);
                 } else {
-                    return Err(WasmError::new(0, 0, "Expected variable name for block"));
+                    return Err(WasmError::err("Expected variable name for block"));
                 }
                 if !source.expect("\"")? {
                     return Err(WasmError::err(
@@ -320,13 +323,47 @@ impl<'a> Block<'a> {
         &self.variable_name
     }
 
-    pub(crate) fn identity(&self) -> Result<crate::types::Identifier> {
+    pub(crate) fn value_type(&self) -> Result<ValueType> {
+        let content = self
+            .content
+            .ok_or(WasmError::err("expected type, found nothing"))?;
+        ValueType::from_str(content.trim())
+    }
+
+    pub(crate) fn value_types(&self) -> Result<Vec<ValueType>> {
+        let content = self
+            .content
+            .ok_or(WasmError::err("expected type, found nothing"))?;
+        let splits = content.split(" ");
+        splits
+            .map(ValueType::from_str)
+            .collect::<Result<Vec<ValueType>>>()
+    }
+
+    pub(crate) fn try_identity(&self) -> Result<Option<String>> {
+        match self.variable_name.len() {
+            0 => Ok(None),
+            1 => Ok(self.variable_name.get(0).clone().map(|s| s.to_string())),
+            _ => Err(WasmError::err("tried to find idenity, found to many")),
+        }
+    }
+
+    pub(crate) fn identity(&self) -> Result<Identifier> {
+        //TODO(Alec): Convert Identifier to option string
         if self.variable_name.len() != 1 {
             Err(WasmError::err("only one identifer can be used"))
         } else if let Some(id) = self.variable_name.get(0) {
             Ok(Identifier::String(id.to_string()))
         } else {
             panic!("This should never trigger :/")
+        }
+    }
+
+    pub(crate) fn expect(&self, type_id: BlockType) -> Result<()> {
+        if *self.type_id() == type_id {
+            Ok(())
+        } else {
+            Err(WasmError::expect(type_id, self.type_id()))
         }
     }
 }

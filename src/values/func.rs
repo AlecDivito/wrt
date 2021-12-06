@@ -7,6 +7,7 @@ use crate::{
 
 use super::value::ValueType;
 
+#[derive(Debug)]
 pub struct Param {
     id: Option<String>,
     value_type: Vec<ValueType>,
@@ -45,6 +46,8 @@ impl Display for Param {
         write!(f, "(result {})", content)
     }
 }
+
+#[derive(Debug)]
 pub struct Result {
     value_type: Vec<ValueType>,
 }
@@ -71,9 +74,22 @@ impl Display for Result {
     }
 }
 
+#[derive(Debug)]
 pub struct FunctionType {
     parameters: Vec<Param>,
     results: Vec<Result>,
+}
+
+impl FunctionType {
+    /// Get a reference to the function type's results.
+    pub fn results(&self) -> &[Result] {
+        self.results.as_ref()
+    }
+
+    /// Get a reference to the function type's parameters.
+    pub fn parameters(&self) -> &[Param] {
+        self.parameters.as_ref()
+    }
 }
 
 impl<'a> TryFrom<&Block<'a>> for FunctionType {

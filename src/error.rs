@@ -1,26 +1,33 @@
 use std::{error::Error, fmt::Display, num::ParseIntError};
 
+use crate::block::BlockType;
+
 #[derive(Debug)]
 pub struct WasmError {
-    line: usize,
-    character: usize,
     reason: String,
 }
 
 impl WasmError {
-    pub fn new(line: usize, character: usize, reason: impl Into<String>) -> Self {
+    pub fn err(reason: impl Into<String>) -> Self {
         Self {
-            line,
-            character,
             reason: reason.into(),
         }
     }
 
-    pub fn err(reason: impl Into<String>) -> Self {
+    pub fn expect(expected: BlockType, found: &BlockType) -> WasmError {
         Self {
-            line: 0,
-            character: 0,
-            reason: reason.into(),
+            reason: format!("expected: {} found: {}", expected, found),
+        }
+    }
+
+    pub(crate) fn expected(expected: &[BlockType], found: &BlockType) -> WasmError {
+        let types = expected
+            .iter()
+            .map(|b| b.to_string())
+            .collect::<Vec<String>>()
+            .join(", ");
+        Self {
+            reason: format!("expected: {}; found: {}", types, found),
         }
     }
 }
@@ -35,11 +42,7 @@ impl Error for WasmError {}
 
 impl Display for WasmError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Error found on line {} on character {}",
-            self.line, self.character
-        )
+        write!(f, "Error: {}", self.reason)
     }
 }
 
