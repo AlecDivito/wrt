@@ -122,3 +122,111 @@ impl Display for FunctionType {
         )
     }
 }
+
+#[cfg(test)]
+mod test {
+
+    use crate::block::SubString;
+    use crate::error::Result;
+
+    use super::*;
+
+    fn parse(program: &str) -> Result<Block> {
+        let mut source = SubString::new(program);
+        Block::parse(&mut source)
+    }
+
+    #[test]
+    fn parse_function_type() {
+        let block = parse("(func)").unwrap();
+        let func = FunctionType::try_from(&block).unwrap();
+        assert!(func.parameters.is_empty());
+        assert!(func.results.is_empty());
+    }
+
+    #[test]
+    fn parse_function_type_with_param() {
+        let block = parse("(func (param i32))").unwrap();
+        let func = FunctionType::try_from(&block).unwrap();
+        let param = func.parameters.get(0).unwrap();
+        assert_eq!(*param.value_type.get(0).unwrap(), ValueType::I32(0));
+        assert_eq!(param.value_type.len(), 1);
+        assert!(func.results.is_empty());
+    }
+
+    #[test]
+    fn parse_function_type_with_param_and_id() {
+        let block = parse("(func (param $id i32))").unwrap();
+        let func = FunctionType::try_from(&block).unwrap();
+        let param = func.parameters.get(0).unwrap();
+        assert_eq!(*param.value_type.get(0).unwrap(), ValueType::I32(0));
+        assert_eq!(param.value_type.len(), 1);
+        assert_eq!(param.id.unwrap(), "$id");
+        assert!(func.results.is_empty());
+    }
+
+    #[test]
+    fn parse_function_type_with_multiple_param_and_ids() {
+        let block = parse("(func (param $id0 i32) (param $id1 i32) (param $id2 i32))").unwrap();
+        let func = FunctionType::try_from(&block).unwrap();
+        for (i, param) in func.parameters.iter().enumerate() {
+            assert_eq!(*param.value_type.get(0).unwrap(), ValueType::I32(0));
+            assert_eq!(param.value_type.len(), 1);
+            assert_eq!(param.id.unwrap(), format!("$id{}", i));
+        }
+        assert!(func.results.is_empty());
+    }
+
+    #[test]
+    fn parse_function_type_with_multiple_params_in_one_block() {
+        let block = parse("(func (param i32 i32 i32))").unwrap();
+        let func = FunctionType::try_from(&block).unwrap();
+        let param = func.parameters.get(0).unwrap();
+        assert!(param.id.is_none());
+        assert_eq!(param.value_type.len(), 3);
+        assert!(func.results.is_empty());
+    }
+
+    #[test]
+    fn parse_function_type_with_result() {
+        let block = parse("(func (result i32))").unwrap();
+        let func = FunctionType::try_from(&block).unwrap();
+        let result = func.results.get(0).unwrap();
+        assert_eq!(*result.value_type.get(0).unwrap(), ValueType::I32(0));
+        assert_eq!(result.value_type.len(), 1);
+        assert!(func.parameters.is_empty());
+    }
+
+    #[test]
+    fn parse_function_type_with_multiple_results_in_one_block() {
+        let block = parse("(func (result i32 i32 i32))").unwrap();
+        let func = FunctionType::try_from(&block).unwrap();
+        let result = func.results.get(0).unwrap();
+        assert_eq!(result.value_type.len(), 3);
+        assert!(func.parameters.is_empty());
+    }
+
+    #[test]
+    fn parse_function_type_with_param_and_result() {
+        let block = parse("(func (param i32) (result i32))").unwrap();
+        let func = FunctionType::try_from(&block).unwrap();
+        assert_eq!(func.parameters.len(), 1);
+        assert_eq!(func.results.len(), 1);
+        let param = func.parameters.get(0).unwrap();
+        let result = func.results.get(0).unwrap();
+        assert_eq!(*result.value_type.get(0).unwrap(), ValueType::I32(0));
+        assert_eq!(*param.value_type.get(0).unwrap(), ValueType::I32(0));
+    }
+
+    #[test]
+    fn parse_function_type_with_params_and_results() {
+        let block = parse("(func (param i32) (param i32) (result i32) (result i32))").unwrap();
+        let func = FunctionType::try_from(&block).unwrap();
+        assert_eq!(func.parameters.len(), 2);
+        assert_eq!(func.results.len(), 2);
+        for (param, result) in func.parameters.iter().zip(&func.results) {
+            assert_eq!(*result.value_type.get(0).unwrap(), ValueType::I32(0));
+            assert_eq!(*param.value_type.get(0).unwrap(), ValueType::I32(0));
+        }
+    }
+}
