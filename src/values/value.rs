@@ -2,12 +2,21 @@ use std::{fmt::Display, str::FromStr};
 
 use crate::error::WasmError;
 
+use super::func::FunctionType;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum RefType {
+    FuncRef(FunctionType),
+    ExternRef(),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValueType {
     I32(i32),
     I64(i64),
     F32(f32),
     F64(f64),
+    // RefType(RefType)
 }
 
 impl ValueType {

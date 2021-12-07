@@ -1,12 +1,10 @@
 use std::collections::HashMap;
 
 use block::{Block, SubString};
-use types::{function::Frame, instruction::Instruction, module::Module, Identifier};
+use module::{function::Frame, instruction::Instruction, module::Module};
+use values::value::ValueType;
 
-use crate::{
-    error::{Result, WasmError},
-    types::value::ValueType,
-};
+use crate::error::{Result, WasmError};
 
 pub struct Instance {
     main: Module,
@@ -120,5 +118,5 @@ impl Engine {
 
 mod block;
 pub mod error;
-pub mod types;
+pub mod module;
 pub mod values;

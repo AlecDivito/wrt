@@ -1,38 +1,33 @@
-use std::collections::HashMap;
-
 use crate::{
     block::BlockType,
     error::{Result, WasmError},
+    values::func::FunctionType,
     Block,
 };
 
-use super::{
-    export::Export,
-    function::Function,
-    import::{Import, ImportDefinition},
-    Identifier,
-};
+use super::{export::Export, function::Function, global::Global, import::Import};
 
 #[derive(Debug)]
 pub struct Module {
-    // types: Vec<FuncType>
+    types: Vec<FunctionType>,
     // funcs: Vec<Func>
     // tables: Vec<Table>
     // memories: Vec<Memory>
-    // globals: Vec<Global>
+    // globals: Vec<Global>,
     // elements: Vec<Element>
     // datas: Vec<Data>
     // start: Option<Start>
-    // exports: Vec<Export>
-    functions: Vec<Function>,
-    exports: HashMap<Identifier, Export>,
+    // exports: Vec<Export>,
+    // functions: Vec<Function>,
 }
 
 impl Module {
     pub fn new() -> Self {
         Self {
+            types: Vec::new(),
+            globals: Vec::new(),
             functions: Vec::new(),
-            exports: HashMap::new(),
+            exports: Vec::new(),
         }
     }
 

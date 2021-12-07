@@ -2,7 +2,7 @@ use std::{convert::TryFrom, str::FromStr};
 
 use crate::{
     block::{Block, BlockType},
-    error::{Result, WasmError},
+    error::WasmError,
     values::limit::Limit,
 };
 
@@ -15,6 +15,17 @@ pub struct Memory {
     // other stuff
     exports: Vec<Export>,
     import: Option<Import>,
+}
+
+impl Default for Memory {
+    fn default() -> Self {
+        Self {
+            id: Some("0".into()),
+            limit: Limit::min(1),
+            exports: vec![],
+            import: None,
+        }
+    }
 }
 
 impl<'a> TryFrom<&Block<'a>> for Memory {
@@ -45,6 +56,7 @@ impl<'a> TryFrom<&Block<'a>> for Memory {
 
 #[cfg(test)]
 mod test {
+    use crate::error::Result;
     use crate::{block::SubString, types::export::Export};
 
     use super::*;

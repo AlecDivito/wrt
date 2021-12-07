@@ -1,8 +1,8 @@
-use std::str::FromStr;
+use std::{fmt::Display, str::FromStr};
 
 use crate::{block::SubString, error::WasmError};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
     // ?
     Call(String),
@@ -14,6 +14,19 @@ pub enum Instruction {
     // i32 operations
     I32Add,
     I32Const(i32),
+}
+
+impl Display for Instruction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use Instruction::*;
+        match self {
+            Call(v) => write!(f, "(call {})", v),
+            Return => write!(f, "(return)"),
+            LocalGet(v) => write!(f, "(local.get {})", v),
+            I32Add => write!(f, "(i32.add)"),
+            I32Const(v) => write!(f, "(i32.const {})", v),
+        }
+    }
 }
 
 impl FromStr for Instruction {

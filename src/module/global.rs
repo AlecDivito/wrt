@@ -118,6 +118,15 @@ mod test {
     }
 
     #[test]
+    fn imported_global() {
+        let global = parse("(global i32)").unwrap();
+        assert!(global.id.is_none());
+        assert!(global.exports.is_none());
+        assert!(global.import.is_none());
+        assert_eq!(global.value, Mutibility::Const(ValueType::I32(0)));
+    }
+
+    #[test]
     fn const_global() {
         let global = parse("(global $id i32 42)").unwrap();
         assert_eq!(global.id.unwrap(), "$id");

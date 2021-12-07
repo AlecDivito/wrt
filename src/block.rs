@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     error::{Result, WasmError},
-    types::{export::Export, import::Import},
+    module::{export::Export, import::Import, instruction::Instruction},
     values::value::ValueType,
 };
 
@@ -176,6 +176,7 @@ pub enum BlockType {
     Data,
     Offset,
     Mut, // this is a special block
+    Instruction(Instruction),
 }
 
 impl BlockType {
@@ -201,6 +202,7 @@ impl Display for BlockType {
             BlockType::Memory => "memory",
             BlockType::Data => "data",
             BlockType::Offset => "offset",
+            BlockType::Instruction(i) => return write!(f, "{}", i.to_string()),
         };
         write!(f, "{}", content)
     }

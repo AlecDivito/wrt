@@ -7,7 +7,7 @@ use crate::{
 
 use super::value::ValueType;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FuncParam {
     id: Option<String>,
     value_type: Vec<ValueType>,
@@ -59,7 +59,7 @@ impl Display for FuncParam {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FuncResult {
     value_type: Vec<ValueType>,
 }
@@ -86,7 +86,7 @@ impl Display for FuncResult {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FunctionType {
     parameters: Vec<FuncParam>,
     results: Vec<FuncResult>,

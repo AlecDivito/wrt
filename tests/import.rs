@@ -1,4 +1,4 @@
-use wrt::{types::value::ValueType, Engine};
+use wrt::{module::value::ValueType, Engine};
 
 #[test]
 fn function() {
