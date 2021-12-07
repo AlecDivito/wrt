@@ -6,7 +6,6 @@ use std::{
 
 use crate::{
     error::{Result, WasmError},
-    types::Identifier,
     values::value::ValueType,
 };
 
@@ -166,6 +165,8 @@ pub enum BlockType {
     Global,
     Import,
     Export,
+    Table,
+    Memory,
     Function,
     Parameter,
     Result,
@@ -193,6 +194,8 @@ impl Display for BlockType {
             BlockType::Local => "local",
             BlockType::Type => "type",
             BlockType::Mut => "mut",
+            BlockType::Table => "table",
+            BlockType::Memory => "memory",
         };
         write!(f, "{}", content)
     }
@@ -213,6 +216,8 @@ impl FromStr for BlockType {
             "local" => Ok(BlockType::Local),
             "type" => Ok(BlockType::Type),
             "mut" => Ok(BlockType::Mut),
+            "table" => Ok(BlockType::Table),
+            "memory" => Ok(BlockType::Memory),
             _ => Err(WasmError::err(format!("type {} was unexpected", input))),
         }
     }
@@ -359,17 +364,6 @@ impl<'a> Block<'a> {
                 }
             }
             _ => Err(WasmError::err("tried to find idenity, found to many")),
-        }
-    }
-
-    pub(crate) fn identity(&self) -> Result<Identifier> {
-        //TODO(Alec): Convert Identifier to option string
-        if self.variable_name.len() != 1 {
-            Err(WasmError::err("only one identifer can be used"))
-        } else if let Some(id) = self.variable_name.get(0) {
-            Ok(Identifier::String(id.to_string()))
-        } else {
-            panic!("This should never trigger :/")
         }
     }
 

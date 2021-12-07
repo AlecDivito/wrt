@@ -9,6 +9,8 @@ use crate::{
 #[derive(Debug)]
 pub enum ImportDescription {
     Function(FunctionType),
+    // Table(Table),
+    // Memory(Memory),
     // Global(Global),
 }
 
@@ -128,7 +130,7 @@ mod test {
         let block = parse("(import \"lib\" \"test\")").unwrap();
         let import = Import::try_from(&block).unwrap();
         assert_eq!(import.module, "lib");
-        assert_eq!(import.module, "test");
+        assert_eq!(import.name, "test");
     }
 
     #[test]
@@ -141,7 +143,7 @@ mod test {
         let block = parse("(import \"lib\" \"test\" (func))").unwrap();
         let import = Import::try_from(&block).unwrap();
         assert_eq!(import.module, "lib");
-        assert_eq!(import.module, "test");
+        assert_eq!(import.name, "test");
         assert!(import.description_id.is_none());
         match import.description.unwrap() {
             ImportDescription::Function(_) => assert!(true),
@@ -154,7 +156,7 @@ mod test {
         let block = parse("(import \"lib\" \"test\" (func $id))").unwrap();
         let import = Import::try_from(&block).unwrap();
         assert_eq!(import.module, "lib");
-        assert_eq!(import.module, "test");
+        assert_eq!(import.name, "test");
         assert_eq!(import.description_id.unwrap(), "$id");
         match import.description.unwrap() {
             ImportDescription::Function(_) => assert!(true),

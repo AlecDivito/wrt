@@ -1,98 +1,163 @@
+use std::convert::TryFrom;
+
 use crate::{
     block::BlockType,
     error::{Result, WasmError},
     Block,
 };
 
-use super::{module::Module, parameter::Parameter, Identifier};
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+pub enum Identifier {
+    String(String),
+    Number(usize),
+}
 
-#[derive(Debug, PartialEq)]
-pub enum ExportType {
+#[derive(Debug)]
+pub enum ExportDescription {
     Function(Identifier),
+    Table(Identifier),
+    Memory(Identifier),
     Global(Identifier),
 }
 
-impl ExportType {
-    pub fn function_id(&self) -> Option<&Identifier> {
-        match self {
-            ExportType::Function(id) => Some(id),
-            ExportType::Global(id) => Some(id),
-        }
-    }
-}
-
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct Export {
-    id: Identifier,
-    export: ExportType,
+    name: String,
+    description: Option<ExportDescription>,
 }
 
 impl Export {
-    pub fn make_global_export(id: Identifier, global_id: &Identifier) -> Export {
-        Self {
-            id,
-            export: ExportType::Global(global_id.clone()),
+    pub fn try_from_block_without_description<'a>(
+        block: &Block<'a>,
+        description: Option<ExportDescription>,
+    ) -> Result<Export> {
+        block.expect(BlockType::Export)?;
+
+        let names = block.names()?;
+        match names.len() {
+            0 => Err(WasmError::err("export does not contain a name")),
+            1 => Ok(Self {
+                name: names[1].to_owned(),
+                description,
+            }),
+            _ => Err(WasmError::err("export contains to many names")),
         }
     }
 
-    pub fn make_function_export(param: Parameter, func_id: Identifier) -> Export {
-        Self {
-            id: Identifier::String(param.id().unwrap()),
-            export: ExportType::Function(func_id),
-        }
+    /// Get a reference to the export's name.
+    pub fn name(&self) -> &str {
+        self.name.as_ref()
     }
+}
 
-    pub fn build(module: &Module, block: &Block) -> Result<Self> {
-        if let BlockType::Export = block.type_id() {
-            // we require that the export block has an identifer
-            let id = *block.variable_name().get(0).ok_or(WasmError::err(format!(
-                "exported type required an identifier. None found"
-            )))?;
-            // we require that the export block exports something
-            let child = block.children().get(0).ok_or(WasmError::err(format!(
-                "expected module, found {}",
-                block.type_id()
-            )))?;
-            // the identifier that can be used to get the data
-            let identifier = *child.variable_name().get(0).ok_or(WasmError::err(format!(
-                "exported type requires an identifier, none found"
-            )))?;
+impl<'a> TryFrom<&Block<'a>> for Export {
+    type Error = WasmError;
 
-            match child.type_id() {
-                BlockType::Function => {
-                    if let Some(func) = module.function(&Identifier::String(identifier.into())) {
-                        Ok(Self {
-                            id: Identifier::String(id.into()),
-                            export: ExportType::Function(func.identifier()),
-                        })
-                    } else {
-                        Err(WasmError::err(format!(
-                            "exported type function could not be found with identifier {}",
-                            identifier
-                        )))
+    fn try_from(block: &Block<'a>) -> std::result::Result<Self, Self::Error> {
+        block.expect(BlockType::Export)?;
+
+        let children = block.children();
+
+        match children.len() {
+            0 => Err(WasmError::err(
+                "expected a child description, found nothing",
+            )),
+            1 => {
+                let child = children[0];
+
+                let id = match child.try_identity()? {
+                    Some(id) => Identifier::String(id),
+                    None => match child.content() {
+                        Some(id_index) => Identifier::Number(id_index.parse::<usize>()?),
+                        None => {
+                            return Err(WasmError::err("export id or index could not be found"))
+                        }
+                    },
+                };
+
+                let description = Some(match child.type_id() {
+                    BlockType::Function => ExportDescription::Function(id),
+                    BlockType::Table => ExportDescription::Table(id),
+                    BlockType::Memory => ExportDescription::Memory(id),
+                    BlockType::Global => ExportDescription::Global(id),
+                    _ => {
+                        return Err(WasmError::expected(
+                            &[
+                                BlockType::Function,
+                                BlockType::Table,
+                                BlockType::Memory,
+                                BlockType::Global,
+                            ],
+                            child.type_id(),
+                        ))
                     }
-                }
-                BlockType::Global => {
-                    todo!("Fully implementing the global class before I support this")
-                }
-                _ => Err(WasmError::err(format!(
-                    "support for exporting type {} is not currently supported",
-                    child.type_id()
-                ))),
+                });
+                Export::try_from_block_without_description(&block, description)
             }
-        } else {
-            Err(WasmError::err(format!(
-                "expected module, found {}",
-                block.type_id()
-            )))
+            _ => Err(WasmError::err(
+                "expected a child description, found more then 1",
+            )),
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+
+    use crate::block::SubString;
+
+    use super::*;
+
+    fn parse(program: &str) -> Result<Block> {
+        let mut source = SubString::new(program);
+        Block::parse(&mut source)
+    }
+
+    #[test]
+    fn parse_only_export_fails() {
+        assert!(parse("(export)").is_err());
+    }
+
+    #[test]
+    fn parse_export() {
+        let block = parse("(export \"test\")").unwrap();
+        let export = Export::try_from(&block).unwrap();
+        assert_eq!(export.name, "test");
+    }
+
+    #[test]
+    fn parse_export_with_too_many_arguments_fails() {
+        assert!(parse("(export \"lib\" \"test\")").is_err());
+    }
+
+    #[test]
+    fn parse_export_with_func_without_identifier() {
+        assert!(parse("(export \"test\" (func))").is_err());
+    }
+
+    #[test]
+    fn parse_export_with_func_usize_definition() {
+        let block = parse("(export \"test\" (func 0))").unwrap();
+        let export = Export::try_from(&block).unwrap();
+        assert_eq!(export.name, "test");
+        assert!(export.description.is_some());
+        match export.description.unwrap() {
+            ExportDescription::Function(id) => assert_eq!(id, Identifier::Number(0)),
+            _ => assert!(false),
         }
     }
 
-    pub fn export_type(&self) -> &ExportType {
-        &self.export
-    }
-
-    pub(crate) fn id(&self) -> Identifier {
-        self.id.clone()
+    #[test]
+    fn parse_export_with_func_string_definition() {
+        let block = parse("(export \"test\" (func $id))").unwrap();
+        let export = Export::try_from(&block).unwrap();
+        assert_eq!(export.name, "test");
+        assert!(export.description.is_some());
+        match export.description.unwrap() {
+            ExportDescription::Function(id) => {
+                assert_eq!(id, Identifier::String("$id".to_string()))
+            }
+            _ => assert!(false),
+        }
     }
 }
