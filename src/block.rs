@@ -1,10 +1,12 @@
 use std::{
+    convert::TryFrom,
     fmt::Display,
     str::{FromStr, SplitWhitespace},
 };
 
 use crate::{
     error::{Result, WasmError},
+    types::{export::Export, import::Import},
     values::value::ValueType,
 };
 
@@ -171,6 +173,8 @@ pub enum BlockType {
     Result,
     Local,
     Type,
+    Data,
+    Offset,
     Mut, // this is a special block
 }
 
@@ -195,6 +199,8 @@ impl Display for BlockType {
             BlockType::Mut => "mut",
             BlockType::Table => "table",
             BlockType::Memory => "memory",
+            BlockType::Data => "data",
+            BlockType::Offset => "offset",
         };
         write!(f, "{}", content)
     }
@@ -217,6 +223,8 @@ impl FromStr for BlockType {
             "mut" => Ok(BlockType::Mut),
             "table" => Ok(BlockType::Table),
             "memory" => Ok(BlockType::Memory),
+            "data" => Ok(BlockType::Data),
+            "offset" => Ok(BlockType::Offset),
             _ => Err(WasmError::err(format!("type {} was unexpected", input))),
         }
     }
@@ -342,6 +350,32 @@ impl<'a> Block<'a> {
         splits
             .map(ValueType::from_str)
             .collect::<Result<Vec<ValueType>>>()
+    }
+
+    pub(crate) fn export_children(&self) -> Result<Vec<Export>> {
+        let mut exports = vec![];
+        for child in &self.children {
+            if BlockType::Export == *child.type_id() {
+                exports.push(Export::try_from(child)?)
+            }
+        }
+        Ok(exports)
+    }
+
+    pub(crate) fn import_child(&self) -> Result<Option<Import>> {
+        let mut import = None;
+        for child in &self.children {
+            if BlockType::Import == *child.type_id() {
+                if import.is_some() {
+                    return Err(WasmError::err(
+                        "only one import can be declared on an block",
+                    ));
+                } else {
+                    import.insert(Import::try_from(child)?);
+                }
+            }
+        }
+        Ok(import)
     }
 
     pub(crate) fn names(&self) -> Result<&[&str]> {

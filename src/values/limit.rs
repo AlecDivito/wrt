@@ -2,9 +2,20 @@ use std::str::FromStr;
 
 use crate::error::WasmError;
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct Limit {
     min: u32,
     max: Option<u32>,
+}
+
+impl Limit {
+    pub fn new(min: u32, max: Option<u32>) -> Self {
+        Self { min, max }
+    }
+
+    pub fn min(min: u32) -> Self {
+        Self { min, max: None }
+    }
 }
 
 impl FromStr for Limit {
