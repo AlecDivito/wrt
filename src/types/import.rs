@@ -6,7 +6,7 @@ use crate::{
     values::func::FunctionType,
 };
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ImportDescription {
     Function(FunctionType),
     // Table(Table),
@@ -22,7 +22,7 @@ impl Display for ImportDescription {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Import {
     module: String,
     name: String,
@@ -31,6 +31,15 @@ pub struct Import {
 }
 
 impl Import {
+    pub fn new(module: impl Into<String>, name: impl Into<String>) -> Import {
+        Self {
+            module: module.into(),
+            name: name.into(),
+            description_id: None,
+            description: None,
+        }
+    }
+
     pub fn try_from_block_without_description<'a>(
         block: &Block<'a>,
         description_id: Option<String>,

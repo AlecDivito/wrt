@@ -12,7 +12,7 @@ pub enum Identifier {
     Number(usize),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ExportDescription {
     Function(Identifier),
     Table(Identifier),
@@ -20,13 +20,20 @@ pub enum ExportDescription {
     Global(Identifier),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Export {
     name: String,
     description: Option<ExportDescription>,
 }
 
 impl Export {
+    pub fn new(name: impl Into<String>) -> Export {
+        Self {
+            name: name.into(),
+            description: None,
+        }
+    }
+
     pub fn try_from_block_without_description<'a>(
         block: &Block<'a>,
         description: Option<ExportDescription>,

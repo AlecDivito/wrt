@@ -1,6 +1,6 @@
 use std::{error::Error, fmt::Display, num::ParseIntError};
 
-use crate::block::BlockType;
+use crate::{block::BlockType, values::value::ValueType};
 
 #[derive(Debug)]
 pub struct WasmError {
@@ -28,6 +28,12 @@ impl WasmError {
             .join(", ");
         Self {
             reason: format!("expected: {}; found: {}", types, found),
+        }
+    }
+
+    pub(crate) fn expected_type(expected: ValueType, found: ValueType) -> WasmError {
+        Self {
+            reason: format!("expected: {}; found: {}", expected, found),
         }
     }
 }
