@@ -26,8 +26,8 @@ impl<'a> TryFrom<Block<'a>> for Global {
         let id = block.try_identity()?;
         // let value = block.global_type()?;
 
-        let mut import = None;
         let mut exports: Option<Vec<Export>> = None;
+        let mut import = None;
         let mut value = None;
 
         for child in block.children() {

@@ -13,6 +13,18 @@ pub struct FuncParam {
     value_type: Vec<ValueType>,
 }
 
+impl FuncParam {
+    /// Get a reference to the func param's value type.
+    pub fn value_type(&self) -> &[ValueType] {
+        self.value_type.as_ref()
+    }
+
+    /// Get a reference to the func param's id.
+    pub fn id(&self) -> Option<&String> {
+        self.id.as_ref()
+    }
+}
+
 impl<'a> TryFrom<&Block<'a>> for FuncParam {
     type Error = WasmError;
 
@@ -89,6 +101,13 @@ impl FunctionType {
     /// Get a reference to the function type's parameters.
     pub fn parameters(&self) -> &[FuncParam] {
         self.parameters.as_ref()
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            parameters: Vec::new(),
+            results: Vec::new(),
+        }
     }
 
     pub fn try_from_block_allowing_other_children<'a>(block: &Block<'a>) -> Result<Self> {
