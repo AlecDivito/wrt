@@ -1,6 +1,9 @@
 use std::{error::Error, fmt::Display, num::ParseIntError};
 
-use crate::{block::BlockType, values::value::ValueType};
+use crate::{
+    block::{Block, BlockType},
+    values::value::ValueType,
+};
 
 #[derive(Debug)]
 pub struct WasmError {
@@ -20,7 +23,7 @@ impl WasmError {
         }
     }
 
-    pub(crate) fn expected(expected: &[BlockType], found: &BlockType) -> WasmError {
+    pub fn expected(expected: &[BlockType], found: &BlockType) -> WasmError {
         let types = expected
             .iter()
             .map(|b| b.to_string())
@@ -31,9 +34,15 @@ impl WasmError {
         }
     }
 
-    pub(crate) fn expected_type(expected: ValueType, found: ValueType) -> WasmError {
+    pub fn expected_type(expected: ValueType, found: ValueType) -> WasmError {
         Self {
             reason: format!("expected: {}; found: {}", expected, found),
+        }
+    }
+
+    pub fn block_not_empty(block: &Block) -> WasmError {
+        Self {
+            reason: format!("expected block to be empty, found the following: {}", block),
         }
     }
 }

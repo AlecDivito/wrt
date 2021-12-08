@@ -1,4 +1,4 @@
-use wrt::{module::value::ValueType, Engine};
+use wrt::Engine;
 fn main() {
     let p2 = r#"(module (global $global (export "global") (mut i32) 42))"#;
     let p1 = r#"(module
