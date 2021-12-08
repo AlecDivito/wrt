@@ -1,15 +1,18 @@
 use std::{fmt::Display, str::FromStr};
 
-use crate::{block::SubString, error::WasmError};
+use crate::{
+    block::{Identifier, SubString},
+    error::{WasmError, WrapError},
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
     // ?
-    Call(String),
+    Call(Identifier),
     Return,
 
     // ?
-    LocalGet(usize),
+    LocalGet(Identifier),
 
     // i32 operations
     I32Add,
@@ -35,29 +38,28 @@ impl FromStr for Instruction {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let trimed = s.trim();
         let mut source = SubString::new(trimed);
-        if let Some(token) = source.eat_instruction() {
+        if let Some(token) = source.eat_instruction()? {
             match token {
                 "call" => {
                     let id = source
                         .eat_identifier()
-                        .ok_or(WasmError::err("expected argument of function id"))?;
-                    Ok(Instruction::Call(id.into()))
+                        .wrap_err(WasmError::err("expected argument of function id"))?;
+                    Ok(Instruction::Call(id))
                 }
                 "return" => Ok(Instruction::Return),
 
                 "local.get" => {
-                    let index = source
-                        .eat_numeric()
-                        .ok_or(WasmError::err("expected argument"))?;
-                    let arg = index.parse()?;
-                    Ok(Instruction::LocalGet(arg))
+                    let id = source
+                        .eat_identifier()
+                        .wrap_err(WasmError::err("expected argument of function id"))?;
+                    Ok(Instruction::LocalGet(id))
                 }
 
                 "i32.add" => Ok(Instruction::I32Add),
                 "i32.const" => {
                     let number = source
-                        .eat_numeric()
-                        .ok_or(WasmError::err("expected argument"))?;
+                        .eat_numeric()?
+                        .ok_or(WasmError::err("expected numeric argument"))?;
                     let arg = i32::from_str(number)
                         .map_err(|_| WasmError::err("expected i32 but did not find it"))?;
                     Ok(Instruction::I32Const(arg))

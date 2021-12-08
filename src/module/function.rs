@@ -1,60 +1,57 @@
 use std::{convert::TryFrom, str::FromStr};
 
 use crate::{
-    block::BlockType,
+    block::{BlockType, Identifier},
     error::{Result, WasmError},
-    values::{
-        func::{FuncParam, FunctionType},
-        value::ValueType,
-    },
+    values::func::{FuncParam, FunctionType},
     Block,
 };
 
 use super::{export::Export, import::Import, instruction::Instruction};
 
-#[derive(Debug)]
-pub struct Frame<'a> {
-    pub opcodes: &'a [Instruction],
-    values: Vec<ValueType>,
-    params: Vec<ValueType>,
-    results: &'a [ValueType],
-    locals: &'a [ValueType],
-}
+// #[derive(Debug)]
+// pub struct Frame<'a> {
+//     pub opcodes: &'a [Instruction],
+//     values: Vec<ValueType>,
+//     params: Vec<ValueType>,
+//     results: &'a [ValueType],
+//     locals: &'a [ValueType],
+// }
 
-impl<'a> Frame<'a> {
-    pub fn set_result(&mut self) -> Result<Vec<ValueType>> {
-        let mut vec = Vec::new();
-        for result in self.results {
-            let value = self
-                .pop()
-                .ok_or(WasmError::err("Stack is empty when getting results"))?;
-            if result.type_equality(&value) {
-                vec.push(value);
-            } else {
-                return Err(WasmError::err("Stack contained incorrect value"));
-            }
-        }
-        Ok(vec)
-    }
+// impl<'a> Frame<'a> {
+//     pub fn set_result(&mut self) -> Result<Vec<ValueType>> {
+//         let mut vec = Vec::new();
+//         for result in self.results {
+//             let value = self
+//                 .pop()
+//                 .ok_or(WasmError::err("Stack is empty when getting results"))?;
+//             if result.type_equality(&value) {
+//                 vec.push(value);
+//             } else {
+//                 return Err(WasmError::err("Stack contained incorrect value"));
+//             }
+//         }
+//         Ok(vec)
+//     }
 
-    pub fn push_param(&mut self, index: &usize) -> Result<()> {
-        self.values.push(
-            self.params
-                .get(*index)
-                .ok_or(WasmError::err(format!("Index out of bounds: {}", index)))?
-                .clone(),
-        );
-        Ok(())
-    }
+//     pub fn push_param(&mut self, index: &usize) -> Result<()> {
+//         self.values.push(
+//             self.params
+//                 .get(*index)
+//                 .ok_or(WasmError::err(format!("Index out of bounds: {}", index)))?
+//                 .clone(),
+//         );
+//         Ok(())
+//     }
 
-    pub fn pop(&mut self) -> Option<ValueType> {
-        self.values.pop()
-    }
+//     pub fn pop(&mut self) -> Option<ValueType> {
+//         self.values.pop()
+//     }
 
-    pub(crate) fn push(&mut self, v: ValueType) {
-        self.values.push(v)
-    }
-}
+//     pub(crate) fn push(&mut self, v: ValueType) {
+//         self.values.push(v)
+//     }
+// }
 
 // #[derive(Debug)]
 // pub struct FuncImpl {
@@ -305,65 +302,69 @@ impl<'a> Frame<'a> {
 
 #[derive(Debug)]
 pub struct Function {
-    id: Option<String>,
-    // TODO(Alec): Locals and function parameters can not have the same ids
+    id: Option<Identifier>,
     locals: Vec<FuncParam>,
     type_id: FunctionType, // can be anonomy or typed
 
     // other things
     import: Option<Import>,
-    exports: Option<Vec<Export>>,
+    exports: Vec<Export>,
     instructions: Vec<Instruction>,
 }
 
-impl<'a> TryFrom<&Block<'a>> for Function {
+impl<'a> TryFrom<&mut Block<'a>> for Function {
     type Error = WasmError;
 
-    fn try_from(block: &Block<'a>) -> std::result::Result<Self, Self::Error> {
+    fn try_from(block: &mut Block<'a>) -> std::result::Result<Self, Self::Error> {
         block.expect(BlockType::Function)?;
-        let id = block.try_identity()?;
+
+        let id = block.take_id_or_attribute_as_identifier();
         let type_id = FunctionType::try_from_block_allowing_other_children(block)?;
+        let locals = block
+            .take_children_that_are(BlockType::Local)
+            .iter_mut()
+            .map(FuncParam::try_from)
+            .collect::<Result<Vec<FuncParam>>>()?;
 
-        let mut exports: Option<Vec<Export>> = None;
-        let mut import = None;
-        let mut locals = Vec::new();
+        let exports = block
+            .take_children_that_are(BlockType::Export)
+            .iter_mut()
+            .map(|block| Export::try_from_block_without_description(block, None))
+            .collect::<Result<Vec<Export>>>()?;
 
-        for child in block.children() {
-            use BlockType::*;
-            match child.type_id() {
-                Import => {
-                    if import.is_some() {
-                        return Err(WasmError::err(
-                            "global blocks can only contain one import statement",
-                        ));
-                    }
-                    import.insert(super::import::Import::try_from(child)?);
-                }
-                Export => {
-                    let export = super::export::Export::try_from(child)?;
-                    if let Some(e) = exports {
-                        e.push(export);
-                    } else {
-                        exports.insert(vec![export]);
-                    }
-                }
-                Local => locals.push(FuncParam::try_from(child)?),
-                Result | Parameter => continue,
-                _ => {
-                    return Err(WasmError::expected(
-                        &[Import, Export, Parameter, Result, Local],
-                        child.type_id(),
-                    ))
-                }
-            }
-        }
+        let mut imports = block
+            .take_children_that_are(BlockType::Import)
+            .iter_mut()
+            .map(|block| Import::try_from_block_without_description(block, None, None))
+            .collect::<Result<Vec<Import>>>()?;
 
-        //TODO(Alec): I believe that a function can have no content. will need to double check that
-        let mut content = block.content().unwrap_or("").to_string();
-        let instructions = content
-            .lines()
-            .map(Instruction::from_str)
-            .collect::<Result<Vec<Instruction>>>()?;
+        let import = if let Some(import) = imports.pop() {
+            if imports.is_empty() {
+                Ok(Some(import))
+            } else {
+                Err(WasmError::err(format!(
+                    "expected at most 1 import, found {}",
+                    imports.len() + 1
+                )))
+            }?
+        } else {
+            None
+        };
+
+        let instructions = if let Some(content) = block.take_content() {
+            content
+                .lines()
+                .map(Instruction::from_str)
+                .collect::<Result<Vec<Instruction>>>()
+        } else {
+            // let blocks = block
+            //     .take_children_that_are(BlockType::Instruction)
+            //     .iter_mut()
+            //     .map(|b| Instruction::try_from(b))
+            //     .collect::<Result<Vec<Instruction>>>()?;
+            // Instruction::try_from(blocks)
+            todo!("implement block style instructions")
+        }?;
 
         if import.is_some() {
             if !instructions.is_empty() || !locals.is_empty() {
@@ -373,25 +374,11 @@ impl<'a> TryFrom<&Block<'a>> for Function {
             }
         }
 
-        let fun = |v: &[FuncParam]| {
-            v.iter()
-                .map(|l| l.id())
-                .filter(|p| p.is_some())
-                .map(|p| p.unwrap())
-                .collect::<Vec<&String>>()
-        };
-
-        let local_ids = fun(&locals);
-        let param_ids = fun(type_id.parameters());
-
-        for id in local_ids {
-            if param_ids.contains(&id) {
-                return Err(WasmError::err(
-                    "function can not have parameters and local share the same ids",
-                ));
-            }
+        for local in &locals {
+            local.compare_unique_ids(type_id.parameters())?;
         }
 
+        block.should_be_empty()?;
         Ok(Self {
             id,
             locals,
@@ -405,12 +392,14 @@ impl<'a> TryFrom<&Block<'a>> for Function {
 
 #[cfg(test)]
 mod test {
+    use crate::values::value::ValueType;
+
     use super::*;
 
     fn parse(string: &str) -> Result<Function> {
         let mut source = crate::block::SubString::new(string);
-        let block = Block::parse(&mut source)?;
-        let func = Function::try_from(&block)?;
+        let mut block = Block::parse(&mut source)?;
+        let func = Function::try_from(&mut block)?;
         Ok(func)
     }
 
@@ -422,7 +411,7 @@ mod test {
         assert_eq!(func.type_id, FunctionType::empty());
         assert!(func.instructions.is_empty());
         assert!(func.import.is_none());
-        assert!(func.exports.is_none());
+        assert!(func.exports.is_empty());
     }
 
     #[test]
@@ -434,7 +423,7 @@ mod test {
         assert_eq!(func.type_id, FunctionType::empty());
         assert!(func.instructions.is_empty());
         assert!(func.import.is_none());
-        assert!(func.exports.is_none());
+        assert!(func.exports.is_empty());
     }
 
     #[test]
@@ -446,31 +435,31 @@ mod test {
         assert_eq!(func.type_id, FunctionType::empty());
         assert_eq!(func.instructions.len(), 1);
         assert!(func.import.is_none());
-        assert!(func.exports.is_none());
+        assert!(func.exports.is_empty());
     }
 
     #[test]
     fn func_with_local_identifer_and_instructions() {
         let func = parse("(func $id (local i32) i32.const 42)").unwrap();
-        assert_eq!(func.id.unwrap(), "$id");
+        assert_eq!(func.id.unwrap(), Identifier::String("$id".into()));
         assert_eq!(func.locals[0].value_type()[0], ValueType::I32(0));
         assert!(func.locals[0].id().is_none());
         assert_eq!(func.type_id, FunctionType::empty());
         assert_eq!(func.instructions.len(), 1);
         assert!(func.import.is_none());
-        assert!(func.exports.is_none());
+        assert!(func.exports.is_empty());
     }
 
     #[test]
     fn func_with_local_export_identifer_and_instructions() {
         let func = parse("(func $id (export \"test\") (local i32) i32.const 42)").unwrap();
-        assert_eq!(func.id.unwrap(), "$id");
+        assert_eq!(func.id.unwrap(), Identifier::String("$id".into()));
         assert_eq!(func.locals[0].value_type()[0], ValueType::I32(0));
         assert!(func.locals[0].id().is_none());
         assert_eq!(func.type_id, FunctionType::empty());
         assert_eq!(func.instructions.len(), 1);
         assert!(func.import.is_none());
-        assert_eq!(func.exports.unwrap()[0], Export::new("test"));
+        assert_eq!(func.exports[0], Export::new("test"));
     }
 
     #[test]
@@ -491,12 +480,12 @@ mod test {
     #[test]
     fn func_with_id_export_and_import() {
         let func = parse("(func $id (export \"test\") (import \"a\" \"b\") )").unwrap();
-        assert_eq!(func.id.unwrap(), "$id");
+        assert_eq!(func.id.unwrap(), Identifier::String("$id".into()));
         assert_eq!(func.type_id, FunctionType::empty());
         assert!(func.instructions.is_empty());
         assert!(func.locals.is_empty());
         assert_eq!(func.import.unwrap(), Import::new("a", "b"));
-        assert_eq!(func.exports.unwrap()[0], Export::new("test"));
+        assert_eq!(func.exports[0], Export::new("test"));
     }
 
     #[test]
@@ -504,13 +493,13 @@ mod test {
         let func =
             parse("(func $id (export \"test\") (export \"test2\") (local i32) i32.const 42)")
                 .unwrap();
-        assert_eq!(func.id.unwrap(), "$id");
+        assert_eq!(func.id.unwrap(), Identifier::String("$id".into()));
         assert_eq!(func.locals[0].value_type()[0], ValueType::I32(0));
         assert!(func.locals[0].id().is_none());
         assert_eq!(func.type_id, FunctionType::empty());
         assert_eq!(func.instructions.len(), 1);
         assert!(func.import.is_none());
-        assert_eq!(func.exports.unwrap()[0], Export::new("test"));
-        assert_eq!(func.exports.unwrap()[1], Export::new("test2"));
+        assert_eq!(func.exports[0], Export::new("test"));
+        assert_eq!(func.exports[1], Export::new("test2"));
     }
 }

@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use block::Block;
 use module::module::Module;
 use values::value::ValueType;
@@ -7,29 +5,30 @@ use values::value::ValueType;
 use crate::error::Result;
 
 pub struct Instance {
-    main: Module,
-    modules: HashMap<String, Module>,
+    // main: Module,
+// modules: HashMap<String, Module>,
 }
 
 impl Instance {
-    pub fn new(module: Module) -> Self {
+    pub fn new(/* module: Module */) -> Self {
         Self {
-            main: module,
-            modules: HashMap::new(),
+            // main: module,
+            // modules: HashMap::new(),
         }
     }
 
-    pub fn link(&mut self, module: Module, name: impl Into<String>) {
+    pub fn link(&mut self /*module: Module, name: impl Into<String> */) {
         //TODO(Alec): maybe do some error checking??? but then again, i'm not
         // sure if the module should be added right now or later but this is the
         // implementation i've choosen so far.
-        self.modules.insert(name.into(), module);
+        // self.modules.insert(name.into(), module);
+        todo!()
     }
 
     pub fn execute(
         &self,
-        name: impl Into<String>,
-        parameters: &[ValueType],
+        // name: impl Into<String>,
+        // parameters: &[ValueType],
     ) -> Result<Vec<ValueType>> {
         // let name = name.into();
         // let export = self.main.export(&name).ok_or(WasmError::err(format!(
@@ -98,7 +97,7 @@ impl Engine {
         Self {}
     }
 
-    pub fn compile(&self, text: &str) -> Result<Module> {
+    pub fn compile(&self /*text: &str*/) -> Result<Module> {
         todo!();
         // let mut program_str = SubString::new(text);
         // let program = Block::parse(&mut program_str)?;
@@ -106,7 +105,8 @@ impl Engine {
         // Module::build(program)
     }
 
-    pub fn compile_and_run(text: &str, func: &str, args: &[ValueType]) -> Result<Vec<ValueType>> {
+    pub fn compile_and_run(/*text: &str, func: &str, args: &[ValueType]*/) -> Result<Vec<ValueType>>
+    {
         todo!();
         // let engine = Engine::new();
         // let module = engine.compile(text)?;
@@ -114,7 +114,7 @@ impl Engine {
         // instance.execute(func, args)
     }
 
-    pub fn instantiate(&self, module: Module) -> Instance {
+    pub fn instantiate(&self /* module: Module */) -> Instance {
         todo!();
         // Instance::new(module)
     }

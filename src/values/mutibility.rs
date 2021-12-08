@@ -41,7 +41,7 @@ impl Display for Mutibility {
 impl<'a> TryFrom<&Block<'a>> for Mutibility {
     type Error = WasmError;
 
-    fn try_from(block: &Block<'a>) -> std::result::Result<Self, Self::Error> {
+    fn try_from(_: &Block<'a>) -> std::result::Result<Self, Self::Error> {
         // block.expect(BlockType::Mut)?;
         // match block.content() {
         //     Some(content) => Ok(Mutibility::Mut(ValueType::from_str(content)?)),

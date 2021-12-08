@@ -23,12 +23,30 @@ impl FuncParam {
     pub fn id(&self) -> Option<&Identifier> {
         self.id.as_ref()
     }
+
+    pub(crate) fn compare_unique_ids(&self, parameters: &[FuncParam]) -> Result<()> {
+        if let Some(id) = &self.id {
+            for param in parameters {
+                if let Some(other) = &param.id {
+                    if id == other {
+                        return Err(WasmError::err(format!(
+                            "ids {} found to be repeated at least once; no repeating ids allowed",
+                            id
+                        )));
+                    }
+                }
+            }
+            Ok(())
+        } else {
+            Ok(())
+        }
+    }
 }
 
-impl<'a> TryFrom<&'a mut Block<'a>> for FuncParam {
+impl<'a> TryFrom<&mut Block<'a>> for FuncParam {
     type Error = WasmError;
 
-    fn try_from(block: &'a mut Block<'a>) -> std::result::Result<Self, Self::Error> {
+    fn try_from(block: &mut Block<'a>) -> std::result::Result<Self, Self::Error> {
         block.expect(BlockType::Parameter)?;
 
         let mut id = block.take_id();
@@ -90,10 +108,10 @@ pub struct FuncResult {
     value_type: Vec<ValueType>,
 }
 
-impl<'a> TryFrom<&'a mut Block<'a>> for FuncResult {
+impl<'a> TryFrom<&mut Block<'a>> for FuncResult {
     type Error = WasmError;
 
-    fn try_from(block: &'a mut Block<'a>) -> std::result::Result<Self, Self::Error> {
+    fn try_from(block: &mut Block<'a>) -> std::result::Result<Self, Self::Error> {
         block.expect(BlockType::Result)?;
         let value_type = block.all_attributes_to_value_type()?;
         block.should_be_empty()?;
@@ -137,7 +155,7 @@ impl FunctionType {
         }
     }
 
-    pub fn try_from_block_allowing_other_children<'a>(block: &'a mut Block<'a>) -> Result<Self> {
+    pub fn try_from_block_allowing_other_children<'a>(block: &mut Block<'a>) -> Result<Self> {
         block.expect(BlockType::Function)?;
         let parameters = FunctionType::get_parameters(block)?;
         let results = FunctionType::get_results(block)?;
@@ -259,6 +277,11 @@ mod test {
             &Identifier::String("$id".into())
         );
         assert!(func.results.is_empty());
+    }
+
+    #[test]
+    fn parse_function_type_fails_with_params_with_same_string_id() {
+        assert!(parse("(func (param $id i32) (param $id i32))").is_err());
     }
 
     #[test]

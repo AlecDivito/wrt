@@ -1,7 +1,7 @@
 use std::{convert::TryFrom, fmt::Display};
 
 use crate::{
-    block::{Block, BlockType},
+    block::{Block, BlockType, Identifier},
     error::{Result, WasmError},
     values::func::FunctionType,
 };
@@ -26,7 +26,7 @@ impl Display for ImportDescription {
 pub struct Import {
     module: String,
     name: String,
-    description_id: Option<String>,
+    description_id: Option<Identifier>,
     description: Option<ImportDescription>,
 }
 
@@ -41,24 +41,30 @@ impl Import {
     }
 
     pub fn try_from_block_without_description<'a>(
-        block: &Block<'a>,
-        description_id: Option<String>,
+        block: &mut Block<'a>,
+        id: Option<Identifier>,
         description: Option<ImportDescription>,
     ) -> Result<Import> {
         block.expect(BlockType::Import)?;
-        let names = block.names()?;
-
-        match names.len() {
-            0 => Err(WasmError::err("import does not contain module and name")),
-            1 => Err(WasmError::err("import does not contain name")),
-            2 => Ok(Self {
-                module: names[0].to_owned(),
-                name: names[1].to_owned(),
-                description_id,
-                description,
-            }),
-            _ => Err(WasmError::err("import contains to many names")),
-        }
+        let name = block
+            .pop_name()
+            .ok_or(WasmError::err(
+                "expected module and name on import block. Found none",
+            ))?
+            .to_string();
+        let module = block
+            .pop_name()
+            .ok_or(WasmError::err(
+                "expected name on import block. Found only module",
+            ))?
+            .to_string();
+        block.should_be_empty()?;
+        Ok(Self {
+            name,
+            module,
+            description_id: id,
+            description: description,
+        })
     }
 
     /// Get a reference to the import's module.
@@ -72,39 +78,57 @@ impl Import {
     }
 }
 
-impl<'a> TryFrom<&Block<'a>> for Import {
+impl<'a> TryFrom<&mut Block<'a>> for Option<Import> {
     type Error = WasmError;
 
-    fn try_from(block: &Block<'a>) -> std::result::Result<Self, Self::Error> {
+    fn try_from(block: &mut Block<'a>) -> std::result::Result<Self, Self::Error> {
+        let mut imports = block
+            .take_children_that_are(BlockType::Import)
+            .iter_mut()
+            .map(|block| Import::try_from_block_without_description(block, None, None))
+            .collect::<Result<Vec<Import>>>()?;
+        match imports.pop() {
+            Some(import) => {
+                if imports.is_empty() {
+                    Ok(Some(import))
+                } else {
+                    Err(WasmError::err(format!(
+                        "expected at most 1 import, found {}",
+                        imports.len() + 1
+                    )))
+                }
+            }
+            None => Ok(None),
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a mut Block<'a>> for Import {
+    type Error = WasmError;
+
+    fn try_from(block: &'a mut Block<'a>) -> std::result::Result<Self, Self::Error> {
         block.expect(BlockType::Import)?;
 
-        let children = block.children();
-
-        match children.len() {
-            0 => Err(WasmError::err(
+        if let Some(mut child) = block.pop_child() {
+            let id = child.take_id_or_attribute_as_identifier();
+            let description = match child.type_id() {
+                BlockType::Function => {
+                    ImportDescription::Function(FunctionType::try_from(&mut child)?)
+                }
+                _ => return Err(WasmError::err("import does not contain description")),
+            };
+            Import::try_from_block_without_description(block, id, Some(description))
+        } else {
+            Err(WasmError::err(
                 "expected a child description, found nothing",
-            )),
-            1 => {
-                let child = children[0];
-                let description_id = child.try_identity()?;
-                let description = Some(match child.type_id() {
-                    BlockType::Function => {
-                        ImportDescription::Function(FunctionType::try_from(&child)?)
-                    }
-                    _ => return Err(WasmError::err("import does not contain description")),
-                });
-                Import::try_from_block_without_description(&block, description_id, description)
-            }
-            _ => Err(WasmError::err(
-                "expected a child description, found more then 1",
-            )),
+            ))
         }
     }
 }
 
 impl Display for Import {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(desc) = self.description {
+        if let Some(desc) = &self.description {
             write!(f, "(module {} {} {})", self.module, self.name, desc)
         } else {
             write!(f, "(module {} {})", self.module, self.name)
@@ -119,9 +143,10 @@ mod test {
 
     use super::*;
 
-    fn parse(program: &str) -> Result<Block> {
+    fn parse(program: &str) -> Result<Import> {
         let mut source = SubString::new(program);
-        Block::parse(&mut source)
+        let mut block = Block::parse(&mut source)?;
+        Import::try_from(&mut block)
     }
 
     #[test]
@@ -136,8 +161,7 @@ mod test {
 
     #[test]
     fn parse_import() {
-        let block = parse("(import \"lib\" \"test\")").unwrap();
-        let import = Import::try_from(&block).unwrap();
+        let import = parse("(import \"lib\" \"test\")").unwrap();
         assert_eq!(import.module, "lib");
         assert_eq!(import.name, "test");
     }
@@ -149,27 +173,41 @@ mod test {
 
     #[test]
     fn parse_import_with_func_definition() {
-        let block = parse("(import \"lib\" \"test\" (func))").unwrap();
-        let import = Import::try_from(&block).unwrap();
+        let import = parse("(import \"lib\" \"test\" (func))").unwrap();
         assert_eq!(import.module, "lib");
         assert_eq!(import.name, "test");
         assert!(import.description_id.is_none());
         match import.description.unwrap() {
-            ImportDescription::Function(_) => assert!(true),
-            _ => assert!(false),
+            ImportDescription::Function(_) => {
+                assert!(true)
+            } // _ => assert!(false),
         }
     }
 
     #[test]
     fn parse_import_with_func_definition_including_id() {
-        let block = parse("(import \"lib\" \"test\" (func $id))").unwrap();
-        let import = Import::try_from(&block).unwrap();
+        let import = parse("(import \"lib\" \"test\" (func $id))").unwrap();
         assert_eq!(import.module, "lib");
         assert_eq!(import.name, "test");
-        assert_eq!(import.description_id.unwrap(), "$id");
+        assert_eq!(
+            import.description_id.unwrap(),
+            Identifier::String("$id".into())
+        );
         match import.description.unwrap() {
             ImportDescription::Function(_) => assert!(true),
-            _ => assert!(false),
+            // _ => assert!(false),
+        }
+    }
+
+    #[test]
+    fn parse_import_with_func_definition_including_number_id() {
+        let import = parse("(import \"lib\" \"test\" (func 0))").unwrap();
+        assert_eq!(import.module, "lib");
+        assert_eq!(import.name, "test");
+        assert_eq!(import.description_id.unwrap(), Identifier::Number(0));
+        match import.description.unwrap() {
+            ImportDescription::Function(_) => assert!(true),
+            // _ => assert!(false),
         }
     }
 }

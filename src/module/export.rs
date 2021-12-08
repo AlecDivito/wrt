@@ -1,8 +1,8 @@
 use std::convert::TryFrom;
 
 use crate::{
-    block::BlockType,
-    error::{Result, WasmError},
+    block::{BlockType, Identifier},
+    error::{Result, WasmError, WrapContext},
     Block,
 };
 
@@ -29,20 +29,16 @@ impl Export {
     }
 
     pub fn try_from_block_without_description<'a>(
-        block: &Block<'a>,
+        block: &mut Block<'a>,
         description: Option<ExportDescription>,
     ) -> Result<Export> {
         block.expect(BlockType::Export)?;
-
-        let names = block.names()?;
-        match names.len() {
-            0 => Err(WasmError::err("export does not contain a name")),
-            1 => Ok(Self {
-                name: names[1].to_owned(),
-                description,
-            }),
-            _ => Err(WasmError::err("export contains to many names")),
-        }
+        let name = block
+            .pop_name()
+            .ok_or(WasmError::err("expected name, found none"))?
+            .to_string();
+        block.should_be_empty()?;
+        Ok(Self { name, description })
     }
 
     /// Get a reference to the export's name.
@@ -51,53 +47,55 @@ impl Export {
     }
 }
 
-impl<'a> TryFrom<&Block<'a>> for Export {
+impl<'a> TryFrom<&mut Block<'a>> for Vec<Export> {
     type Error = WasmError;
 
-    fn try_from(block: &Block<'a>) -> std::result::Result<Self, Self::Error> {
+    fn try_from(block: &mut Block<'a>) -> std::result::Result<Self, Self::Error> {
+        block
+            .take_children_that_are(BlockType::Export)
+            .iter_mut()
+            .map(|block| Export::try_from_block_without_description(block, None))
+            .collect::<Result<Vec<Export>>>()
+    }
+}
+
+impl<'a> TryFrom<&mut Block<'a>> for Export {
+    type Error = WasmError;
+
+    fn try_from(block: &mut Block<'a>) -> std::result::Result<Self, Self::Error> {
         block.expect(BlockType::Export)?;
 
-        let children = block.children();
-
-        match children.len() {
-            0 => Err(WasmError::err(
+        if let Some(mut child) = block.pop_child() {
+            let id = child
+                .take_id_or_attribute_as_identifier()
+                .ok_or(WasmError::err(
+                    "export child block requires index identifer",
+                ))?;
+            let description = match child.type_id() {
+                BlockType::Function => ExportDescription::Function(id),
+                BlockType::Table => ExportDescription::Table(id),
+                BlockType::Memory => ExportDescription::Memory(id),
+                BlockType::Global => ExportDescription::Global(id),
+                _ => {
+                    return Err(WasmError::expected(
+                        &[
+                            BlockType::Function,
+                            BlockType::Table,
+                            BlockType::Memory,
+                            BlockType::Global,
+                        ],
+                        child.type_id(),
+                    ))
+                }
+            };
+            child.should_be_empty().wrap_context(
+                "Expected the child block of export to only contain an id, but found more",
+            )?;
+            Export::try_from_block_without_description(block, Some(description))
+        } else {
+            Err(WasmError::err(
                 "expected a child description, found nothing",
-            )),
-            1 => {
-                let child = children[0];
-
-                let id = match child.try_identity()? {
-                    Some(id) => Identifier::String(id),
-                    None => match child.content() {
-                        Some(id_index) => Identifier::Number(id_index.parse::<usize>()?),
-                        None => {
-                            return Err(WasmError::err("export id or index could not be found"))
-                        }
-                    },
-                };
-
-                let description = Some(match child.type_id() {
-                    BlockType::Function => ExportDescription::Function(id),
-                    BlockType::Table => ExportDescription::Table(id),
-                    BlockType::Memory => ExportDescription::Memory(id),
-                    BlockType::Global => ExportDescription::Global(id),
-                    _ => {
-                        return Err(WasmError::expected(
-                            &[
-                                BlockType::Function,
-                                BlockType::Table,
-                                BlockType::Memory,
-                                BlockType::Global,
-                            ],
-                            child.type_id(),
-                        ))
-                    }
-                });
-                Export::try_from_block_without_description(&block, description)
-            }
-            _ => Err(WasmError::err(
-                "expected a child description, found more then 1",
-            )),
+            ))
         }
     }
 }
@@ -109,9 +107,10 @@ mod test {
 
     use super::*;
 
-    fn parse(program: &str) -> Result<Block> {
+    fn parse(program: &str) -> Result<Export> {
         let mut source = SubString::new(program);
-        Block::parse(&mut source)
+        let mut block = Block::parse(&mut source)?;
+        Export::try_from(&mut block)
     }
 
     #[test]
@@ -121,8 +120,7 @@ mod test {
 
     #[test]
     fn parse_export() {
-        let block = parse("(export \"test\")").unwrap();
-        let export = Export::try_from(&block).unwrap();
+        let export = parse("(export \"test\")").unwrap();
         assert_eq!(export.name, "test");
     }
 
@@ -138,8 +136,7 @@ mod test {
 
     #[test]
     fn parse_export_with_func_usize_definition() {
-        let block = parse("(export \"test\" (func 0))").unwrap();
-        let export = Export::try_from(&block).unwrap();
+        let export = parse("(export \"test\" (func 0))").unwrap();
         assert_eq!(export.name, "test");
         assert!(export.description.is_some());
         match export.description.unwrap() {
@@ -150,8 +147,7 @@ mod test {
 
     #[test]
     fn parse_export_with_func_string_definition() {
-        let block = parse("(export \"test\" (func $id))").unwrap();
-        let export = Export::try_from(&block).unwrap();
+        let export = parse("(export \"test\" (func $id))").unwrap();
         assert_eq!(export.name, "test");
         assert!(export.description.is_some());
         match export.description.unwrap() {

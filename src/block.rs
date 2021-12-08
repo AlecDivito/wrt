@@ -24,11 +24,6 @@ impl<'a> SubString<'a> {
         }
     }
 
-    /// return the rest of the source starting at the current location of the index
-    fn current(&self) -> &'a str {
-        &self.source[self.index..]
-    }
-
     /// expect what the starting of the current index looks like. Good for peeking
     /// at the current character.
     fn expect(&self, source: &'a str) -> Result<bool> {
@@ -143,14 +138,14 @@ impl<'a> SubString<'a> {
     }
 
     /// eat numeric characters
-    fn eat_numeric(&mut self) -> Result<Option<&'a str>> {
+    pub fn eat_numeric(&mut self) -> Result<Option<&'a str>> {
         self.eat_token(SubString::is_whitespace);
         self.eat_token_until(SubString::is_numeric, SubString::is_whitespace_or_end_block)
             .wrap_err("failed to eat numeric token")
     }
 
     /// eat instruction consumes only lowercase ascii characters and periods
-    fn eat_instruction(&mut self) -> Result<Option<&'a str>> {
+    pub fn eat_instruction(&mut self) -> Result<Option<&'a str>> {
         self.eat_token(SubString::is_whitespace);
         self.eat_token_until(
             SubString::is_valid_instruction,
@@ -188,6 +183,19 @@ impl<'a> SubString<'a> {
             Err(WasmError::err(
                 "expected string or number identifier, found something else",
             ))
+        }
+    }
+
+    /// read the stream until the identifier has been completely read. This can
+    /// be used for string or number identifiers and is mainly used when reading
+    /// instructions
+    pub fn eat_identifier(&mut self) -> Result<Identifier> {
+        self.eat_token(SubString::is_whitespace);
+        let id = self.eat_token(SubString::is_valid_identifier).unwrap();
+        if let Ok(num_id) = id.trim().parse::<usize>() {
+            Ok(Identifier::Number(num_id))
+        } else {
+            Ok(Identifier::String(id.into()))
         }
     }
 
@@ -489,7 +497,7 @@ impl<'a> Block<'a> {
         source.eat_white_space();
         source.push_breakpoint();
 
-        if let Err(mut err) = Block::parse_block(&mut block, source) {
+        if let Err(err) = Block::parse_block(&mut block, source) {
             if err.context_len() <= 1 {
                 Err(err).wrap_context(format!(
                     "Parsed block up until: {}",
@@ -783,6 +791,28 @@ impl<'a> Block<'a> {
     #[inline]
     fn is_content_empty(&self) -> bool {
         self.names.is_empty() && self.children.is_empty()
+    }
+
+    pub fn take_id_or_attribute_as_identifier(&mut self) -> Option<Identifier> {
+        match self.take_id() {
+            Some(id) => Some(id),
+            None => match self.pop_attribute_as_identifier() {
+                Ok(id) => Some(id),
+                Err(_) => None,
+            },
+        }
+    }
+
+    pub(crate) fn take_content(&mut self) -> Option<String> {
+        if self.content.is_empty() {
+            None
+        } else {
+            Some(self.content.join("\n"))
+        }
+    }
+
+    pub(crate) fn pop_name(&mut self) -> Option<&str> {
+        self.names.pop()
     }
 }
 
