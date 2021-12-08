@@ -158,7 +158,7 @@ impl FunctionType {
 
     fn get_results(block: &mut Block) -> Result<Vec<FuncResult>> {
         block
-            .take_children_that_are(BlockType::Parameter)
+            .take_children_that_are(BlockType::Result)
             .iter_mut()
             .map(|b| FuncResult::try_from(b))
             .collect::<Result<Vec<FuncResult>>>()
@@ -207,23 +207,32 @@ mod test {
 
     use super::*;
 
-    fn parse(program: &str) -> Result<Block> {
-        let mut source = SubString::new(program);
-        Block::parse(&mut source)
+    fn parse(p: &str) -> Result<FunctionType> {
+        let mut source = SubString::new(p);
+        let mut block = Block::parse(&mut source)?;
+        FunctionType::try_from(&mut block)
+    }
+
+    fn unwrap<D>(r: Result<D>) -> D {
+        match r {
+            Ok(res) => res,
+            Err(e) => {
+                print!("{}", e);
+                panic!("failed to pass test");
+            }
+        }
     }
 
     #[test]
     fn parse_function_type() {
-        let mut block = parse("(func)").unwrap();
-        let func = FunctionType::try_from(&mut block).unwrap();
+        let func = unwrap(parse("(func)"));
         assert!(func.parameters.is_empty());
         assert!(func.results.is_empty());
     }
 
     #[test]
     fn parse_function_type_with_param() {
-        let mut block = parse("(func (param i32))").unwrap();
-        let func = FunctionType::try_from(&mut block).unwrap();
+        let func = unwrap(parse("(func (param i32))"));
         let param = func.parameters.get(0).unwrap();
         assert_eq!(*param.value_type.get(0).unwrap(), ValueType::I32(0));
         assert_eq!(param.value_type.len(), 1);
@@ -232,8 +241,7 @@ mod test {
 
     #[test]
     fn parse_function_type_with_multiple_params() {
-        let mut block = parse("(func (param i32 i32 i32))").unwrap();
-        let func = FunctionType::try_from(&mut block).unwrap();
+        let func = unwrap(parse("(func (param i32 i32 i32))"));
         let param = func.parameters.get(0).unwrap();
         assert!(param.id.is_none());
         assert_eq!(param.value_type.len(), 3);
@@ -242,8 +250,7 @@ mod test {
 
     #[test]
     fn parse_function_type_with_param_and_string_id() {
-        let mut block = parse("(func (param $id i32))").unwrap();
-        let func = FunctionType::try_from(&mut block).unwrap();
+        let func = unwrap(parse("(func (param $id i32))"));
         let param = func.parameters.get(0).unwrap();
         assert_eq!(*param.value_type.get(0).unwrap(), ValueType::I32(0));
         assert_eq!(param.value_type.len(), 1);
@@ -256,8 +263,7 @@ mod test {
 
     #[test]
     fn parse_function_type_with_param_and_int_id() {
-        let mut block = parse("(func (param 0 i32))").unwrap();
-        let func = FunctionType::try_from(&mut block).unwrap();
+        let func = unwrap(parse("(func (param 0 i32))"));
         let param = func.parameters.get(0).unwrap();
         assert_eq!(*param.value_type.get(0).unwrap(), ValueType::I32(0));
         assert_eq!(param.value_type.len(), 1);
@@ -267,8 +273,9 @@ mod test {
 
     #[test]
     fn parse_function_type_with_multiple_param_and_string_ids() {
-        let mut block = parse("(func (param $id0 i32) (param $id1 i32) (param $id2 i32))").unwrap();
-        let func = FunctionType::try_from(&mut block).unwrap();
+        let func = unwrap(parse(
+            "(func (param $id0 i32) (param $id1 i32) (param $id2 i32))",
+        ));
         for (i, param) in func.parameters.iter().enumerate() {
             assert_eq!(*param.value_type.get(0).unwrap(), ValueType::I32(0));
             assert_eq!(param.value_type.len(), 1);
@@ -282,8 +289,7 @@ mod test {
 
     #[test]
     fn parse_function_type_with_result() {
-        let mut block = parse("(func (result i32))").unwrap();
-        let func = FunctionType::try_from(&mut block).unwrap();
+        let func = unwrap(parse("(func (result i32))"));
         let result = func.results.get(0).unwrap();
         assert_eq!(*result.value_type.get(0).unwrap(), ValueType::I32(0));
         assert_eq!(result.value_type.len(), 1);
@@ -292,8 +298,7 @@ mod test {
 
     #[test]
     fn parse_function_type_with_multiple_results_in_one_block() {
-        let mut block = parse("(func (result i32 i32 i32))").unwrap();
-        let func = FunctionType::try_from(&mut block).unwrap();
+        let func = unwrap(parse("(func (result i32 i32 i32))"));
         let result = func.results.get(0).unwrap();
         assert_eq!(result.value_type.len(), 3);
         assert!(func.parameters.is_empty());
@@ -301,8 +306,7 @@ mod test {
 
     #[test]
     fn parse_function_type_with_param_and_result() {
-        let mut block = parse("(func (param i32) (result i32))").unwrap();
-        let func = FunctionType::try_from(&mut block).unwrap();
+        let func = unwrap(parse("(func (param i32) (result i32))"));
         assert_eq!(func.parameters.len(), 1);
         assert_eq!(func.results.len(), 1);
         let param = func.parameters.get(0).unwrap();
@@ -314,8 +318,9 @@ mod test {
 
     #[test]
     fn parse_function_type_with_params_and_results() {
-        let mut block = parse("(func (param i32) (param i32) (result i32) (result i32))").unwrap();
-        let func = FunctionType::try_from(&mut block).unwrap();
+        let func = unwrap(parse(
+            "(func (param i32) (param i32) (result i32) (result i32))",
+        ));
         assert_eq!(func.parameters.len(), 2);
         assert_eq!(func.results.len(), 2);
         for (param, result) in func.parameters.iter().zip(&func.results) {

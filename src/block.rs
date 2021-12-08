@@ -1,7 +1,7 @@
 use std::{fmt::Display, str::FromStr};
 
 use crate::{
-    error::{Result, WasmError},
+    error::{Result, WasmError, WrapContext, WrapError},
     values::value::ValueType,
 };
 
@@ -9,6 +9,8 @@ pub struct SubString<'a> {
     index: usize,
     source: &'a str,
     breakpoints: Vec<usize>,
+    line: usize,
+    column: usize,
 }
 
 impl<'a> SubString<'a> {
@@ -17,6 +19,8 @@ impl<'a> SubString<'a> {
             breakpoints: Vec::new(),
             index: 0,
             source,
+            line: 0,
+            column: 0,
         }
     }
 
@@ -41,7 +45,7 @@ impl<'a> SubString<'a> {
     /// peek at the character and check if it is a text
     fn expect_text(&self) -> Result<bool> {
         if self.index <= self.source.len() {
-            Ok(self.source[self.index..self.index]
+            Ok(self.source[self.index..self.index + 1]
                 .chars()
                 .next()
                 .unwrap()
@@ -58,7 +62,7 @@ impl<'a> SubString<'a> {
     /// or identifications
     fn expect_digit(&self) -> Result<bool> {
         if self.index <= self.source.len() {
-            Ok(self.source[self.index..self.index]
+            Ok(self.source[self.index..self.index + 1]
                 .chars()
                 .next()
                 .unwrap()
@@ -72,9 +76,18 @@ impl<'a> SubString<'a> {
     }
 
     /// move the index counter up one as long as it is not as long as the string
-    fn eat(&mut self) {
+    fn eat(&mut self) -> Result<()> {
         if self.index + 1 != self.source.len() {
             self.index = self.index + 1;
+            if self.expect("\n")? {
+                self.line = self.line + 1;
+                self.column = 0;
+            } else {
+                self.column = self.column + 1;
+            }
+            Ok(())
+        } else {
+            Err(WasmError::eof())
         }
     }
 
@@ -103,7 +116,7 @@ impl<'a> SubString<'a> {
                 if character_slice.starts_with(";)") {
                     break;
                 } else {
-                    self.eat();
+                    self.eat()?;
                 }
             }
             // TODO(Alec): Error checking
@@ -120,30 +133,41 @@ impl<'a> SubString<'a> {
     fn eat_name(&mut self) -> Result<Option<&'a str>> {
         self.eat_token(SubString::is_whitespace);
         self.eat_token_until(SubString::is_valid_name, SubString::is_quotation)
+            .wrap_err("failed to eat name token")
     }
 
     /// eat text values until completely read. TODO(Alec): we may not need this
     fn eat_text(&mut self) -> Result<Option<&'a str>> {
-        self.eat_token_until(SubString::is_text, SubString::is_whitespace)
+        self.eat_token_until(SubString::is_text, SubString::is_whitespace_or_end_block)
+            .wrap_err("failed to eat text token")
     }
 
     /// eat numeric characters
     fn eat_numeric(&mut self) -> Result<Option<&'a str>> {
         self.eat_token(SubString::is_whitespace);
-        self.eat_token_until(SubString::is_numeric, SubString::is_whitespace)
+        self.eat_token_until(SubString::is_numeric, SubString::is_whitespace_or_end_block)
+            .wrap_err("failed to eat numeric token")
     }
 
     /// eat instruction consumes only lowercase ascii characters and periods
     fn eat_instruction(&mut self) -> Result<Option<&'a str>> {
         self.eat_token(SubString::is_whitespace);
-        self.eat_token_until(SubString::is_valid_instruction, SubString::is_whitespace)
+        self.eat_token_until(
+            SubString::is_valid_instruction,
+            SubString::is_whitespace_or_end_block,
+        )
+        .wrap_err("failed to eat instruction token")
     }
 
     /// eat a token and try to convert it into a block type
     fn eat_block_type(&mut self) -> Result<BlockType> {
         self.eat_token(SubString::is_whitespace);
-        if let Some(token) =
-            self.eat_token_until(SubString::is_valid_block_type, SubString::is_whitespace)?
+        if let Some(token) = self
+            .eat_token_until(
+                SubString::is_valid_block_type,
+                SubString::is_whitespace_or_end_block,
+            )
+            .wrap_err("failed to eat instruction token")?
         {
             BlockType::from_str(token)
         } else {
@@ -165,6 +189,10 @@ impl<'a> SubString<'a> {
                 "expected string or number identifier, found something else",
             ))
         }
+    }
+
+    fn block_as_string(&self, block: &Block) -> &str {
+        &self.source[block.start_block_index..self.index + 1]
     }
 
     /// setup a breakpoint to track the content found after reading all of the
@@ -214,7 +242,10 @@ impl<'a> SubString<'a> {
             None
         } else {
             let token = &self.source[self.index..end];
-            self.index = end;
+            // self.index = end;
+            for _ in self.index..end {
+                self.eat().unwrap();
+            }
             Some(token)
         }
     }
@@ -236,23 +267,32 @@ impl<'a> SubString<'a> {
             } else if until(character) {
                 break;
             } else {
-                return Err(WasmError::err(format!(
-                    "unexpected character found: {}",
-                    character
-                )));
+                let e = Err(WasmError::character(character)).wrap_context(format!(
+                    "found at position: line {} and character {}",
+                    self.line,
+                    self.column - 1
+                ));
+                return e;
             }
         }
         if self.index == end {
             Ok(None)
         } else {
             let token = &self.source[self.index..end];
-            self.index = end;
+            // self.index = end;
+            for _ in self.index..end {
+                self.eat().unwrap();
+            }
             Ok(Some(token))
         }
     }
 
     fn is_whitespace(byte: char) -> bool {
         byte.is_whitespace()
+    }
+
+    fn is_whitespace_or_end_block(byte: char) -> bool {
+        byte.is_whitespace() || byte == ')'
     }
 
     fn is_valid_identifier(byte: char) -> bool {
@@ -320,7 +360,7 @@ impl Display for BlockType {
             BlockType::Global => "global",
             BlockType::Import => "import",
             BlockType::Export => "export",
-            BlockType::Function => "function",
+            BlockType::Function => "func",
             BlockType::Parameter => "param",
             BlockType::Result => "result",
             BlockType::Local => "local",
@@ -411,11 +451,14 @@ pub struct Block<'a> {
 
     /// any text found at the end of the block that isn't another block.
     content: Vec<&'a str>,
+
+    /// used to assign the start of a block from the source text
+    start_block_index: usize,
 }
 
 impl<'a> Block<'a> {
     /// create a new empty block with a block type set
-    pub fn new(block_type: BlockType) -> Self {
+    fn new(block_type: BlockType, start_block_index: usize) -> Self {
         Self {
             block_type,
             id: None,
@@ -423,6 +466,7 @@ impl<'a> Block<'a> {
             attributes: Vec::new(),
             children: Vec::new(),
             content: Vec::new(),
+            start_block_index,
         }
     }
 
@@ -430,18 +474,36 @@ impl<'a> Block<'a> {
     /// up the program.
     pub fn parse(source: &mut SubString<'a>) -> Result<Self> {
         // Eat the starting block
+        let start_block_index = source.index;
         if source.expect("(")? {
-            source.eat();
+            source.eat()?;
         } else {
             return Err(WasmError::err("Reached EOF"));
-        }
+        };
 
         // get the type of block
-        let block_type = source.eat_block_type()?; // this should possibly return None
-        let mut block = Block::new(block_type);
+        let block_type = source
+            .eat_block_type()
+            .wrap_context("Block type was not found")?; // this should possibly return None
+        let mut block = Block::new(block_type, start_block_index);
         source.eat_white_space();
         source.push_breakpoint();
 
+        if let Err(mut err) = Block::parse_block(&mut block, source) {
+            if err.context_len() <= 1 {
+                Err(err).wrap_context(format!(
+                    "Parsed block up until: {}",
+                    source.block_as_string(&block)
+                ))
+            } else {
+                Err(err)
+            }
+        } else {
+            Ok(block)
+        }
+    }
+
+    fn parse_block(block: &mut Block<'a>, source: &mut SubString<'a>) -> Result<()> {
         // Read the entire block
         while !source.expect(")")? {
             // 1. if we expect a multiline comment
@@ -449,8 +511,8 @@ impl<'a> Block<'a> {
                 let temporary_content = source.breakpoint_content().unwrap_or("");
                 block.content.push(temporary_content);
                 source.eat_multi_line_comment()?;
-                source.eat(); // eat ';'
-                source.eat(); // eat ')'
+                source.eat()?; // eat ';'
+                source.eat()?; // eat ')'
                 source.eat_white_space();
                 source.push_breakpoint();
             }
@@ -464,14 +526,20 @@ impl<'a> Block<'a> {
             }
             // 3. if it is a new block, parse it!
             else if source.expect("(")? {
-                let child = Block::parse(source)?;
+                let child = Block::parse(source).wrap_err(format!(
+                    "Error when parsing child block in ({}) block",
+                    block.block_type
+                ))?;
                 block.children.push(child);
-                source.eat(); // eat the ending (')') block parentheses
+                source.eat()?; // eat the ending (')') block parentheses
                 source.swap_breakpoint();
             }
             // 4. if the block is empty and the current index points to a '$', it's an id!
             else if block.is_empty() && source.expect("$")? {
-                let id = source.eat_string_identifier()?;
+                let id = source.eat_string_identifier().wrap_err(format!(
+                    "Error when parsing id block in ({}) block",
+                    block.block_type
+                ))?;
                 block.id.insert(id);
                 source.swap_breakpoint();
             }
@@ -479,7 +547,11 @@ impl<'a> Block<'a> {
             else if block.is_content_empty() && source.expect_digit()? {
                 let attribute = source
                     .eat_numeric()?
-                    .ok_or(WasmError::err("Expected numeric block"))?;
+                    .ok_or(WasmError::err("Expected numeric block"))
+                    .wrap_err(format!(
+                        "Error when parsing numeric attribute in ({}) block",
+                        block.block_type
+                    ))?;
                 block.attributes.push(Attribute::Num(attribute));
                 source.swap_breakpoint();
             }
@@ -487,30 +559,46 @@ impl<'a> Block<'a> {
             else if block.is_content_empty() && source.expect_text()? {
                 let attribute = source
                     .eat_text()?
-                    .ok_or(WasmError::err("Expected text block"))?;
+                    .ok_or(WasmError::err("Expected text block"))
+                    .wrap_err(format!(
+                        "Error when alpha-numeric attribute in ({}) block",
+                        block.block_type
+                    ))?;
                 block.attributes.push(Attribute::Str(attribute));
                 source.swap_breakpoint();
             }
             // 7. if the next character is an quotation
             else if source.expect("\"")? {
-                source.eat();
+                source.eat()?;
                 let name = source
                     .eat_name()?
-                    .ok_or(WasmError::err("Expected variable name for block"))?;
+                    .ok_or(WasmError::err("Expected variable name for block"))
+                    .wrap_err(format!(
+                        "Error when parsing quotation name in ({}) block",
+                        block.block_type
+                    ))?;
                 block.names.push(name);
-                source.eat();
+                source.eat()?;
                 source.swap_breakpoint();
             }
             // 8. keep incrementing by one
             else {
-                source.eat();
+                source.eat()?;
             }
         }
         block
             .content
             .push(source.breakpoint_content().unwrap_or(""));
 
-        Ok(block)
+        let mut vec = vec![];
+        while let Some(content) = block.content.pop() {
+            if !content.trim().is_empty() {
+                vec.push(content);
+            }
+        }
+        block.content = vec;
+
+        Ok(())
     }
 
     /// walk the web assembly program and re-print the program back to console
@@ -536,11 +624,28 @@ impl<'a> Block<'a> {
 
     /// expect that the block is empty. If not, throw an error
     pub fn should_be_empty(&self) -> Result<()> {
+        // self.names.is_empty() && self.attributes.is_empty() && self.children.is_empty()
         let is_empty = self.is_empty() && self.id.is_none() && self.content.is_empty();
         if is_empty {
             Ok(())
         } else {
-            Err(WasmError::block_not_empty(self))
+            let mut err = Err(WasmError::block_not_empty(self));
+            if self.id.is_some() {
+                err = err.wrap_context("Did not expect id but found one still in block");
+            }
+            if !self.attributes.is_empty() {
+                err = err.wrap_context("More attributes found in block then expected");
+            }
+            if !self.names.is_empty() {
+                err = err.wrap_context("More names found in block then expected");
+            }
+            if !self.children.is_empty() {
+                err = err.wrap_context("More child blocks found in block then expected");
+            }
+            if !self.content.is_empty() {
+                err = err.wrap_context("Content was found in block when it was not expected");
+            }
+            err
         }
     }
 
