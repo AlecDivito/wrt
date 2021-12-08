@@ -14,4 +14,5 @@ trait Buildable {
 // pub mod instruction;
 // pub mod mem;
 pub mod module;
+pub mod types;
 // pub mod table;

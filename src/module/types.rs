@@ -1,35 +1,44 @@
-use std::{
-    convert::{TryFrom, TryInto},
-    fmt::Display,
-};
+use std::{convert::TryFrom, fmt::Display};
 
 use crate::{
-    block::{Block, BlockType},
+    block::{Block, BlockType, Identifier},
     error::WasmError,
+    values::func::FunctionType,
 };
-
-use super::func::FunctionType;
 
 #[derive(Debug)]
 pub struct TypeIdentifier {
-    id: Option<String>,
+    id: Option<Identifier>,
     func_type: FunctionType,
 }
 
-impl<'a> TryFrom<&Block<'a>> for TypeIdentifier {
+impl<'a> TryFrom<&'a mut Block<'a>> for TypeIdentifier {
     type Error = WasmError;
 
-    fn try_from(block: &Block<'a>) -> Result<Self, Self::Error> {
+    fn try_from(block: &'a mut Block<'a>) -> Result<Self, Self::Error> {
         block.expect(BlockType::Type)?;
-        let id = block.try_identity()?;
-        let func_type = block.try_into()?;
+
+        let id = if let Some(id) = block.take_id() {
+            Some(id)
+        } else if block.attribute_length() >= 1 {
+            Some(block.pop_attribute_as_identifier()?)
+        } else {
+            None
+        };
+
+        let mut child = block.pop_child().ok_or(WasmError::err(
+            "expected 1 child for type block; found none",
+        ))?;
+        let func_type = FunctionType::try_from(&mut child)?;
+
+        block.should_be_empty()?;
         Ok(Self { id, func_type })
     }
 }
 
 impl Display for TypeIdentifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let content = if let Some(id) = self.id {
+        let content = if let Some(id) = &self.id {
             format!("{} {}", id, self.func_type)
         } else {
             self.func_type.to_string()
@@ -63,8 +72,8 @@ mod test {
 
     #[test]
     fn parse_valid_type_identifier() {
-        let block = parse("(type (func))").unwrap();
-        let typeid = TypeIdentifier::try_from(&block).unwrap();
+        let mut block = parse("(type (func))").unwrap();
+        let typeid = TypeIdentifier::try_from(&mut block).unwrap();
         assert!(typeid.id.is_none());
         assert!(typeid.func_type.parameters().is_empty());
         assert!(typeid.func_type.results().is_empty());
@@ -72,9 +81,9 @@ mod test {
 
     #[test]
     fn parse_valid_type_identifier_with_id() {
-        let block = parse("(type $id (func))").unwrap();
-        let typeid = TypeIdentifier::try_from(&block).unwrap();
-        assert_eq!(typeid.id.unwrap(), "$id");
+        let mut block = parse("(type $id (func))").unwrap();
+        let typeid = TypeIdentifier::try_from(&mut block).unwrap();
+        assert_eq!(typeid.id.unwrap(), Identifier::String("$id".to_string()));
         assert!(typeid.func_type.parameters().is_empty());
         assert!(typeid.func_type.results().is_empty());
     }

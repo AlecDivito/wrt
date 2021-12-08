@@ -448,7 +448,7 @@ impl<'a> Block<'a> {
             if source.expect("(;")? {
                 let temporary_content = source.breakpoint_content().unwrap_or("");
                 block.content.push(temporary_content);
-                source.eat_multi_line_comment();
+                source.eat_multi_line_comment()?;
                 source.eat(); // eat ';'
                 source.eat(); // eat ')'
                 source.eat_white_space();
@@ -458,7 +458,7 @@ impl<'a> Block<'a> {
             else if source.expect(";;")? {
                 let temporary_content = source.breakpoint_content().unwrap_or("");
                 block.content.push(temporary_content);
-                source.eat_line_comment();
+                source.eat_line_comment()?;
                 source.eat_white_space();
                 source.push_breakpoint();
             }
@@ -547,7 +547,7 @@ impl<'a> Block<'a> {
     /// take children that are equal to a certian block type.
     pub fn take_children_that_are(&mut self, parameter: BlockType) -> Vec<Block> {
         let mut i = 0;
-        let items = vec![];
+        let mut items = vec![];
         while i < self.children.len() {
             if self.children[i].block_type == parameter {
                 items.push(self.children.remove(i));
@@ -559,26 +559,64 @@ impl<'a> Block<'a> {
     }
 
     /// get access to all of the children (should probably not be used)
-    pub fn children(&'a mut self) -> &'a mut Vec<Block> {
-        self.children.as_mut()
+    // pub fn children(&'a mut self) -> &'a mut Vec<Block> {
+    //     self.children.as_mut()
+    // }
+
+    pub fn type_id(&self) -> &BlockType {
+        &self.block_type
     }
 
-    // pub(crate) fn value_type(&self) -> Result<ValueType> {
-    //     let content = self
-    //         .content
-    //         .ok_or(WasmError::err("expected type, found nothing"))?;
-    //     ValueType::from_str(content.trim())
-    // }
+    pub fn attribute_length(&self) -> usize {
+        self.attributes.len()
+    }
 
-    // pub(crate) fn value_types(&self) -> Result<Vec<ValueType>> {
-    //     let content = self
-    //         .content
-    //         .ok_or(WasmError::err("expected type, found nothing"))?;
-    //     let splits = content.split(" ");
-    //     splits
-    //         .map(ValueType::from_str)
-    //         .collect::<Result<Vec<ValueType>>>()
-    // }
+    pub fn take_id(&mut self) -> Option<Identifier> {
+        self.id.take()
+    }
+
+    pub fn pop_child(&mut self) -> Option<Block<'a>> {
+        self.children.pop()
+    }
+
+    pub fn pop_attribute(&mut self) -> Result<Attribute<'a>> {
+        self.attributes
+            .pop()
+            .ok_or(WasmError::err("expected attribute; found nothing"))
+    }
+
+    pub fn pop_attribute_as_identifier(&mut self) -> Result<Identifier> {
+        let attr = self.pop_attribute()?;
+        match attr {
+            Attribute::Str(_) => {
+                return Err(WasmError::err(
+                    "expected attribute to be number identifier type, found string",
+                ))
+            }
+            Attribute::Num(n) => Ok(Identifier::Number(n.parse::<usize>()?)),
+        }
+    }
+
+    pub fn pop_attribute_as_value_type(&mut self) -> Result<ValueType> {
+        let attr = self.pop_attribute()?;
+        match attr {
+            Attribute::Str(s) => Ok(ValueType::from_str(s)?),
+            Attribute::Num(_) => {
+                return Err(WasmError::err(
+                    "expected attribute to be value type, found integer",
+                ))
+            }
+        }
+    }
+
+    /// convert all attributes to value types
+    pub fn all_attributes_to_value_type(&mut self) -> Result<Vec<ValueType>> {
+        let mut vec = vec![];
+        while !self.attributes.is_empty() {
+            vec.push(self.pop_attribute_as_value_type()?);
+        }
+        Ok(vec)
+    }
 
     // pub(crate) fn export_children(&self) -> Result<Vec<Export>> {
     // let mut exports = vec![];
@@ -668,7 +706,7 @@ impl<'a> Display for Block<'a> {
             .collect::<Vec<String>>()
             .join("\n");
 
-        if let Some(id) = self.id {
+        if let Some(id) = &self.id {
             write!(
                 f,
                 "({} {} {} {} {})",

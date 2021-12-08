@@ -1,4 +1,4 @@
-use wrt::{module::value::ValueType, Engine};
+use wrt::{values::value::ValueType, Engine};
 
 #[test]
 fn empty_program_is_incorrect() {

@@ -22,13 +22,13 @@ impl FromStr for Limit {
     type Err = WasmError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parts = s.split(" ");
+        let mut parts = s.split(" ");
 
         let min = parts
             .next()
             .ok_or(WasmError::err("failed to parse limit as no number exists"))?
             .parse::<u32>()
-            .map_err(|e| {
+            .map_err(|_| {
                 WasmError::err(format!(
                     "expected number, recieved {}",
                     parts.nth(0).unwrap()
@@ -68,7 +68,7 @@ mod test {
         assert_eq!(limit.max, Some(10));
     }
 
-    fn limit_with_min_as_characters() {
-        assert!("limit?".parse::<Limit>().is_err())
-    }
+    // fn limit_with_min_as_characters() {
+    //     assert!("limit?".parse::<Limit>().is_err())
+    // }
 }

@@ -3,7 +3,6 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 use crate::block::Block;
-use crate::block::BlockType;
 use crate::error::Result;
 use crate::error::WasmError;
 
@@ -43,13 +42,14 @@ impl<'a> TryFrom<&Block<'a>> for Mutibility {
     type Error = WasmError;
 
     fn try_from(block: &Block<'a>) -> std::result::Result<Self, Self::Error> {
-        block.expect(BlockType::Mut)?;
-        match block.content() {
-            Some(content) => Ok(Mutibility::Mut(ValueType::from_str(content)?)),
-            None => Err(WasmError::err(
-                "global type expected to be mutable, but found no type",
-            )),
-        }
+        // block.expect(BlockType::Mut)?;
+        // match block.content() {
+        //     Some(content) => Ok(Mutibility::Mut(ValueType::from_str(content)?)),
+        //     None => Err(WasmError::err(
+        //         "global type expected to be mutable, but found no type",
+        //     )),
+        // }
+        todo!()
     }
 }
 

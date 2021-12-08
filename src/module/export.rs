@@ -6,12 +6,6 @@ use crate::{
     Block,
 };
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub enum Identifier {
-    String(String),
-    Number(usize),
-}
-
 #[derive(Debug, PartialEq)]
 pub enum ExportDescription {
     Function(Identifier),
