@@ -64,7 +64,7 @@ impl<'a> TryFrom<&mut Block<'a>> for FuncParam {
                         value_type.push(ValueType::from_str(s)?);
                     }
                     Attribute::Num(n) => {
-                        id.insert(Identifier::Number(n.parse::<usize>()?));
+                        id = Some(Identifier::Number(n.parse::<usize>()?));
                     }
                 };
                 Ok(Self { id, value_type })

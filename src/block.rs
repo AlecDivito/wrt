@@ -639,7 +639,7 @@ impl<'a> Block<'a> {
                     "Error when parsing id block in ({}) block",
                     block.block_type
                 ))?;
-                block.id.insert(id);
+                block.id = Some(id);
                 source.swap_breakpoint();
             }
             // 5. if content is empty and the current index is a digit, it's an attribute

@@ -85,7 +85,7 @@ impl<'a> TryFrom<&mut Block<'a>> for Table {
 
         let mut import = None;
         if let Some(mut blk) = block.take_the_only_child_that_is(BlockType::Import)? {
-            import.insert(Import::try_from_block_without_description(
+            import = Some(Import::try_from_block_without_description(
                 &mut blk, None, None,
             )?);
         }

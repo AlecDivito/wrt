@@ -1,70 +1,113 @@
-use std::{convert::TryFrom, str::FromStr};
+use std::convert::TryFrom;
 
 use crate::{
-    block::{Block, BlockType},
-    error::WasmError,
+    block::{Block, BlockType, Identifier},
+    error::{Result, WasmError},
     values::limit::Limit,
 };
 
-use super::{export::Export, import::Import};
+use super::{data::DataString, export::Export, import::Import};
+
+pub struct MemoryUse {
+    id: Option<Identifier>,
+}
+
+impl Default for MemoryUse {
+    fn default() -> Self {
+        Self {
+            id: Some(Identifier::Number(0)),
+        }
+    }
+}
+
+impl<'a> TryFrom<&mut Block<'a>> for MemoryUse {
+    type Error = WasmError;
+
+    fn try_from(block: &mut Block<'a>) -> std::result::Result<Self, Self::Error> {
+        block.expect(BlockType::Memory)?;
+        let id = block.take_id_or_attribute_as_identifier();
+        block.should_be_empty()?;
+        Ok(Self { id })
+    }
+}
 
 pub struct Memory {
-    id: Option<String>,
+    id: Option<Identifier>,
     limit: Limit,
 
     // other stuff
     exports: Vec<Export>,
     import: Option<Import>,
+    data: Option<DataString>,
 }
 
 impl Default for Memory {
     fn default() -> Self {
         Self {
-            id: Some("0".into()),
+            id: Some(Identifier::Number(0)),
             limit: Limit::min(1),
             exports: vec![],
             import: None,
+            data: None,
         }
     }
 }
 
-impl<'a> TryFrom<&Block<'a>> for Memory {
+impl<'a> TryFrom<&mut Block<'a>> for Memory {
     type Error = WasmError;
 
-    fn try_from(block: &Block<'a>) -> std::result::Result<Self, Self::Error> {
+    fn try_from(mut block: &mut Block<'a>) -> std::result::Result<Self, Self::Error> {
         block.expect(BlockType::Memory)?;
-        let id = block.try_identity()?;
 
-        let limit = if let Some(content) = block.content() {
-            Limit::from_str(content)?
+        let exports = block
+            .take_children_that_are(BlockType::Export)
+            .iter_mut()
+            .map(|block| Export::try_from_block_without_description(block, None))
+            .collect::<Result<Vec<Export>>>()?;
+
+        let mut import = None;
+        if let Some(mut block) = block.take_the_only_child_that_is(BlockType::Import)? {
+            import = Some(Import::try_from_block_without_description(
+                &mut block, None, None,
+            )?);
+        }
+
+        let data = if let Some(mut blk) = block.take_the_only_child_that_is(BlockType::Data)? {
+            Some(DataString::try_from(&mut &mut blk)?)
         } else {
-            //TODO(Alec): this is where we check for a data definition
-            todo!("implement the check for data definition");
+            None
         };
 
-        let exports = block.export_children()?;
-        let import = block.import_child()?;
+        let limit = if let Some(d) = &data {
+            d.limit()
+        } else {
+            Limit::try_from(&mut block)?
+        };
+
+        let id = block.take_id_or_attribute_as_identifier();
+        block.should_be_empty()?;
 
         Ok(Self {
             id,
             limit,
-            exports,
             import,
+            exports,
+            data,
         })
     }
 }
 
 #[cfg(test)]
 mod test {
+    use crate::block::SubString;
     use crate::error::Result;
-    use crate::{block::SubString, types::export::Export};
 
     use super::*;
 
     fn parse(program: &str) -> Result<Memory> {
         let mut source = SubString::new(program);
-        let block = Block::parse(&mut source)?;
-        Memory::try_from(&block)
+        let mut block = Block::parse(&mut source)?;
+        Memory::try_from(&mut block)
     }
 
     #[test]
@@ -89,7 +132,7 @@ mod test {
     fn memory_with_limits_and_id() {
         let mem = parse("(memory $id 1 2)").unwrap();
         assert_eq!(mem.limit, Limit::new(1, Some(2)));
-        assert_eq!(mem.id.unwrap(), "$id");
+        assert_eq!(&mem.id.unwrap().to_string(), "$id");
         assert!(mem.exports.is_empty());
         assert!(mem.import.is_none());
     }
