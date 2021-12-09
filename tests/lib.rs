@@ -107,4 +107,5 @@ fn simpliest_wasm_program() {
 mod export;
 mod global;
 mod import;
+mod table;
 mod types;

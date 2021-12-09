@@ -2,12 +2,22 @@ use std::{fmt::Display, str::FromStr};
 
 use crate::error::WasmError;
 
-use super::func::FunctionType;
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum RefType {
-    FuncRef(FunctionType),
-    ExternRef(),
+    FuncRef,
+    ExternRef,
+}
+
+impl FromStr for RefType {
+    type Err = WasmError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "funcref" => RefType::FuncRef,
+            "externref" => RefType::ExternRef,
+            _ => return Err(WasmError::err(format!("'{}' is not a valid ref type", s))),
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -2,7 +2,7 @@ use std::{convert::TryFrom, str::FromStr};
 
 use crate::{
     block::{BlockType, Identifier},
-    error::{Result, WasmError, WrapContext},
+    error::{Result, WasmError},
     values::func::{FuncParam, FunctionType},
     Block,
 };

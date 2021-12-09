@@ -14,5 +14,5 @@ pub mod import;
 pub mod instruction;
 // pub mod mem;
 pub mod module;
+pub mod table;
 pub mod types;
-// pub mod table;

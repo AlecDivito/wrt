@@ -451,6 +451,24 @@ pub enum Attribute<'a> {
     Num(&'a str),
 }
 
+impl<'a> Attribute<'a> {
+    pub fn as_str(&self) -> Result<&&'a str> {
+        if let Self::Str(v) = self {
+            Ok(v)
+        } else {
+            Err(WasmError::err("expected string attribute, found number"))
+        }
+    }
+
+    pub fn as_num(&self) -> Result<&&'a str> {
+        if let Self::Num(v) = self {
+            Ok(v)
+        } else {
+            Err(WasmError::err("expected number attribute, found string"))
+        }
+    }
+}
+
 impl<'a> Display for Attribute<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

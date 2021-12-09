@@ -2,12 +2,14 @@ use std::convert::TryFrom;
 
 use crate::{block::BlockType, error::WasmError, Block};
 
-use super::{export::Export, function::Function, import::Import, types::TypeIdentifier};
+use super::{
+    export::Export, function::Function, import::Import, table::Table, types::TypeIdentifier,
+};
 
 #[derive(Debug)]
 pub struct Module {
     types: Vec<TypeIdentifier>,
-    // tables: Vec<Table>
+    tables: Vec<Table>,
     // memories: Vec<Memory>
     // globals: Vec<Global>,
     // elements: Vec<Element>
@@ -28,6 +30,7 @@ impl<'a> TryFrom<Block<'a>> for Module {
         let mut funcs = vec![];
         let mut imports = vec![];
         let mut exports = vec![];
+        let mut tables = vec![];
 
         while let Some(mut child) = block.pop_child() {
             match child.type_id() {
@@ -35,6 +38,8 @@ impl<'a> TryFrom<Block<'a>> for Module {
                 BlockType::Function => funcs.push(Function::try_from(&mut child)?),
                 BlockType::Import => imports.push(Import::try_from(&mut child)?),
                 BlockType::Export => exports.push(Export::try_from(&mut child)?),
+                BlockType::Table => tables.push(Table::try_from(&mut child)?),
+
                 _ => return Err(WasmError::expected(&[BlockType::Type], &child.type_id())),
             }
         }
@@ -44,6 +49,7 @@ impl<'a> TryFrom<Block<'a>> for Module {
             funcs,
             imports,
             exports,
+            tables,
         })
     }
 }
@@ -55,6 +61,7 @@ impl Module {
             funcs: Vec::new(),
             imports: Vec::new(),
             exports: Vec::new(),
+            tables: Vec::new(),
         }
     }
 

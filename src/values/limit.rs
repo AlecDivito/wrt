@@ -1,6 +1,6 @@
-use std::str::FromStr;
+use std::{convert::TryFrom, str::FromStr};
 
-use crate::error::WasmError;
+use crate::{block::Block, error::WasmError};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Limit {
@@ -13,8 +13,29 @@ impl Limit {
         Self { min, max }
     }
 
+    pub fn max(min: u32, max: u32) -> Self {
+        Self {
+            min,
+            max: Some(max),
+        }
+    }
+
     pub fn min(min: u32) -> Self {
         Self { min, max: None }
+    }
+}
+
+impl<'a> TryFrom<&mut &mut Block<'a>> for Limit {
+    type Error = WasmError;
+
+    fn try_from(block: &mut &mut Block<'a>) -> std::result::Result<Self, Self::Error> {
+        let max = block.pop_attribute()?.as_num()?.parse::<u32>()?;
+        if let Ok(attr) = block.pop_attribute() {
+            let min = attr.as_num()?.parse::<u32>()?;
+            Ok(Self::max(min, max))
+        } else {
+            Ok(Self::min(max))
+        }
     }
 }
 
