@@ -1,80 +1,128 @@
-use std::{fmt::Display, str::FromStr};
+use std::{convert::TryFrom, fmt::Display, str::FromStr};
 
 use crate::{
-    block::{Identifier, SubString},
-    error::{WasmError, WrapError},
+    block::{Block, BlockType, Identifier},
+    error::{Result, WasmError},
+    values::value::ValueType,
 };
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Instruction {
-    // ?
-    Call(Identifier),
+pub enum Opcode {
+    Call, // (Identifier),
     Return,
 
-    // ?
-    LocalGet(Identifier),
+    LocalGet, // (Identifier),
 
-    // i32 operations
     I32Add,
-    I32Const(i32),
+    I32Const, // (i32),
 }
 
-impl Display for Instruction {
+impl Display for Opcode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use Instruction::*;
-        match self {
-            Call(v) => write!(f, "(call {})", v),
-            Return => write!(f, "(return)"),
-            LocalGet(v) => write!(f, "(local.get {})", v),
-            I32Add => write!(f, "(i32.add)"),
-            I32Const(v) => write!(f, "(i32.const {})", v),
-        }
+        use Opcode::*;
+        let s = match self {
+            Call => "call",
+            Return => "return",
+            LocalGet => "local.get",
+            I32Add => "i32.add",
+            I32Const => "i32.const",
+        };
+        write!(f, "{}", s)
     }
+}
+
+impl FromStr for Opcode {
+    type Err = WasmError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        use Opcode::*;
+        Ok(match s {
+            "call" => Call,
+            "return" => Return,
+            "local.get" => LocalGet,
+            "i32.add" => I32Add,
+            "i32.const" => I32Const,
+            _ => {
+                return Err(WasmError::err(format!(
+                    "block type {} is not known unexpected",
+                    s
+                )))
+            }
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Oprand {
+    Id(Identifier),
+    Value(ValueType),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Instruction {
+    opcode: Opcode,
+    oprands: Vec<Oprand>,
 }
 
 impl FromStr for Instruction {
     type Err = WasmError;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let trimed = s.trim();
-        let mut source = SubString::new(trimed);
-        if let Some(token) = source.eat_instruction()? {
-            match token {
-                "call" => {
-                    let id = source
-                        .eat_identifier()
-                        .wrap_err(WasmError::err("expected argument of function id"))?;
-                    Ok(Instruction::Call(id))
-                }
-                "return" => Ok(Instruction::Return),
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let mut parts = s.split(" ");
+        let opcode = Opcode::from_str(parts.next().ok_or(WasmError::err("expected opcode"))?)?;
+        let mut items = vec![];
+        while let Some(item) = parts.next() {
+            items.push(item)
+        }
+        Instruction::parse(opcode, items)
+    }
+}
 
-                "local.get" => {
-                    let id = source
-                        .eat_identifier()
-                        .wrap_err(WasmError::err("expected argument of function id"))?;
-                    Ok(Instruction::LocalGet(id))
-                }
+impl<'a> TryFrom<Block<'a>> for Instruction {
+    type Error = WasmError;
 
-                "i32.add" => Ok(Instruction::I32Add),
-                "i32.const" => {
-                    let number = source
-                        .eat_numeric()?
-                        .ok_or(WasmError::err("expected numeric argument"))?;
-                    let arg = i32::from_str(number)
-                        .map_err(|_| WasmError::err("expected i32 but did not find it"))?;
-                    Ok(Instruction::I32Const(arg))
-                }
-
-                _ => Err(WasmError::err(format!(
-                    "instruction {} doesn't exist",
-                    token
-                ))),
-            }
+    fn try_from(mut block: Block<'a>) -> std::result::Result<Self, Self::Error> {
+        let content = block.take_content().unwrap_or(String::new());
+        let items = content.split("\n").collect();
+        block.should_be_empty()?;
+        if let BlockType::Opcode(opcode) = block.type_id() {
+            Instruction::parse(opcode.clone(), items)
         } else {
+            Err(WasmError::err("did not find opcode when expected"))
+        }
+    }
+}
+
+impl Instruction {
+    fn pop<'a>(opcode: &Opcode, items: &mut Vec<&'a str>) -> Result<&'a str> {
+        items.pop().ok_or(WasmError::err(format!(
+            "expected item for opcode {}, found none",
+            opcode
+        )))
+    }
+
+    fn parse(opcode: Opcode, mut items: Vec<&str>) -> Result<Instruction> {
+        use Opcode::*;
+        let oprands = match opcode {
+            Return | I32Add => vec![],
+            Call | LocalGet => {
+                let item = Instruction::pop(&opcode, &mut items)?;
+                vec![Oprand::Id(Identifier::from_str(item)?)]
+            }
+            I32Const => {
+                let item = Instruction::pop(&opcode, &mut items)?;
+                let arg = i32::from_str(item)?;
+                vec![Oprand::Value(ValueType::I32(arg))]
+            }
+        };
+
+        if !items.is_empty() {
             Err(WasmError::err(format!(
-                "Did not find a instruction in {}",
-                s
+                "opcode {} recieved to many arguments",
+                opcode
             )))
+        } else {
+            Ok(Self { opcode, oprands })
         }
     }
 }

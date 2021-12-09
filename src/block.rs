@@ -2,6 +2,7 @@ use std::{fmt::Display, str::FromStr};
 
 use crate::{
     error::{Result, WasmError, WrapContext, WrapError},
+    module::instruction::Opcode,
     values::value::ValueType,
 };
 
@@ -218,6 +219,15 @@ impl<'a> SubString<'a> {
         }
     }
 
+    /// peek the breakpoint content but don't change any of the variables
+    fn peek_breakpoint_content(&self) -> &str {
+        if let Some(start) = self.breakpoints.last() {
+            self.source[*start..self.index].trim()
+        } else {
+            ""
+        }
+    }
+
     /// push a new breakpoint
     fn push_breakpoint(&mut self) {
         self.breakpoints.push(self.index)
@@ -352,7 +362,7 @@ pub enum BlockType {
     Data,
     Offset,
     Mut, // this is a special block
-         // Instruction(Instruction),
+    Opcode(Opcode),
 }
 
 impl BlockType {
@@ -378,7 +388,7 @@ impl Display for BlockType {
             BlockType::Memory => "memory",
             BlockType::Data => "data",
             BlockType::Offset => "offset",
-            // BlockType::Instruction(i) => return write!(f, "{}", i.to_string()),
+            BlockType::Opcode(i) => return write!(f, "{}", i),
         };
         write!(f, "{}", content)
     }
@@ -388,23 +398,23 @@ impl FromStr for BlockType {
     type Err = WasmError;
 
     fn from_str(input: &str) -> std::result::Result<BlockType, Self::Err> {
-        match input {
-            "module" => Ok(BlockType::Module),
-            "global" => Ok(BlockType::Global),
-            "import" => Ok(BlockType::Import),
-            "export" => Ok(BlockType::Export),
-            "func" => Ok(BlockType::Function),
-            "param" => Ok(BlockType::Parameter),
-            "result" => Ok(BlockType::Result),
-            "local" => Ok(BlockType::Local),
-            "type" => Ok(BlockType::Type),
-            "mut" => Ok(BlockType::Mut),
-            "table" => Ok(BlockType::Table),
-            "memory" => Ok(BlockType::Memory),
-            "data" => Ok(BlockType::Data),
-            "offset" => Ok(BlockType::Offset),
-            _ => Err(WasmError::err(format!("type {} was unexpected", input))),
-        }
+        Ok(match input {
+            "module" => BlockType::Module,
+            "global" => BlockType::Global,
+            "import" => BlockType::Import,
+            "export" => BlockType::Export,
+            "func" => BlockType::Function,
+            "param" => BlockType::Parameter,
+            "result" => BlockType::Result,
+            "local" => BlockType::Local,
+            "type" => BlockType::Type,
+            "mut" => BlockType::Mut,
+            "table" => BlockType::Table,
+            "memory" => BlockType::Memory,
+            "data" => BlockType::Data,
+            "offset" => BlockType::Offset,
+            _ => BlockType::Opcode(Opcode::from_str(input)?),
+        })
     }
 }
 
@@ -412,6 +422,18 @@ impl FromStr for BlockType {
 pub enum Identifier {
     String(String),
     Number(usize),
+}
+
+impl FromStr for Identifier {
+    type Err = WasmError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        if s.starts_with("$") {
+            Ok(Identifier::String(s.into()))
+        } else {
+            Ok(Identifier::Number(s.parse::<usize>()?))
+        }
+    }
 }
 
 impl Display for Identifier {
@@ -497,18 +519,69 @@ impl<'a> Block<'a> {
         source.eat_white_space();
         source.push_breakpoint();
 
-        if let Err(err) = Block::parse_block(&mut block, source) {
-            if err.context_len() <= 1 {
-                Err(err).wrap_context(format!(
-                    "Parsed block up until: {}",
-                    source.block_as_string(&block)
-                ))
-            } else {
-                Err(err)
-            }
-        } else {
+        if let BlockType::Opcode(_) = &block.block_type {
+            Block::parse_block_instruction(&mut block, source)?;
             Ok(block)
+        } else {
+            if let Err(err) = Block::parse_block(&mut block, source) {
+                if err.context_len() <= 1 {
+                    Err(err).wrap_context(format!(
+                        "Parsed block up until: {}",
+                        source.block_as_string(&block)
+                    ))
+                } else {
+                    Err(err)
+                }
+            } else {
+                Ok(block)
+            }
         }
+    }
+
+    fn parse_block_instruction(block: &mut Block<'a>, source: &mut SubString<'a>) -> Result<()> {
+        while !source.expect(")")? {
+            // 1. if we expect a multiline comment
+            if source.expect("(;")? {
+                let temporary_content = source.breakpoint_content().unwrap_or("");
+                block.content.push(temporary_content);
+                source.eat_multi_line_comment()?;
+                source.eat()?; // eat ';'
+                source.eat()?; // eat ')'
+                source.eat_white_space();
+                source.push_breakpoint();
+            }
+            // 2. if we expect a line comment
+            else if source.expect(";;")? {
+                let temporary_content = source.breakpoint_content().unwrap_or("");
+                block.content.push(temporary_content);
+                source.eat_line_comment()?;
+                source.eat_white_space();
+                source.push_breakpoint();
+            }
+            // 3. if it is a new block, parse it!
+            else if source.expect("(")? {
+                if block.children.len() == 0 {
+                    if let Some(content) = source.breakpoint_content() {
+                        if block.content.len() == 0 {
+                            block.content.push(content.trim())
+                        } else {
+                            return Err(WasmError::err("error when parsing block instruction. Found content after child blocks declared"));
+                        }
+                    }
+                }
+                let child = Block::parse(source).wrap_err(format!(
+                    "Error when parsing child block in ({}) block",
+                    block.block_type
+                ))?;
+                block.children.push(child);
+                source.eat()?; // eat the ending (')') block parentheses
+            }
+            // 8. keep incrementing by one
+            else {
+                source.eat()?;
+            }
+        }
+        Ok(())
     }
 
     fn parse_block(block: &mut Block<'a>, source: &mut SubString<'a>) -> Result<()> {
@@ -533,7 +606,7 @@ impl<'a> Block<'a> {
                 source.push_breakpoint();
             }
             // 3. if it is a new block, parse it!
-            else if source.expect("(")? {
+            else if source.peek_breakpoint_content().trim().is_empty() && source.expect("(")? {
                 let child = Block::parse(source).wrap_err(format!(
                     "Error when parsing child block in ({}) block",
                     block.block_type
@@ -658,11 +731,24 @@ impl<'a> Block<'a> {
     }
 
     /// take children that are equal to a certian block type.
-    pub fn take_children_that_are(&mut self, parameter: BlockType) -> Vec<Block> {
+    pub fn take_children_that_are(&mut self, block_type: BlockType) -> Vec<Block> {
         let mut i = 0;
         let mut items = vec![];
         while i < self.children.len() {
-            if self.children[i].block_type == parameter {
+            if self.children[i].block_type == block_type {
+                items.push(self.children.remove(i));
+            } else {
+                i += 1;
+            }
+        }
+        items
+    }
+
+    pub fn take_children_that_are_opcodes(&mut self) -> Vec<Block> {
+        let mut i = 0;
+        let mut items = vec![];
+        while i < self.children.len() {
+            if let BlockType::Opcode(_) = self.children[i].block_type {
                 items.push(self.children.remove(i));
             } else {
                 i += 1;
@@ -803,7 +889,7 @@ impl<'a> Block<'a> {
         }
     }
 
-    pub(crate) fn take_content(&mut self) -> Option<String> {
+    pub fn take_content(&mut self) -> Option<String> {
         if self.content.is_empty() {
             None
         } else {
@@ -811,7 +897,7 @@ impl<'a> Block<'a> {
         }
     }
 
-    pub(crate) fn pop_name(&mut self) -> Option<&str> {
+    pub fn pop_name(&mut self) -> Option<&str> {
         self.names.pop()
     }
 }

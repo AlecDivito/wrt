@@ -357,13 +357,11 @@ impl<'a> TryFrom<&mut Block<'a>> for Function {
                 .map(Instruction::from_str)
                 .collect::<Result<Vec<Instruction>>>()
         } else {
-            // let blocks = block
-            //     .take_children_that_are(BlockType::Instruction)
-            //     .iter_mut()
-            //     .map(|b| Instruction::try_from(b))
-            //     .collect::<Result<Vec<Instruction>>>()?;
-            // Instruction::try_from(blocks)
-            todo!("implement block style instructions")
+            block
+                .take_children_that_are_opcodes()
+                .drain(..)
+                .map(Instruction::try_from)
+                .collect::<Result<Vec<Instruction>>>()
         }?;
 
         if import.is_some() {
