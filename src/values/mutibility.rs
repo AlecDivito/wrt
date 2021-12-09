@@ -3,6 +3,7 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 use crate::block::Block;
+use crate::block::BlockType;
 use crate::error::Result;
 use crate::error::WasmError;
 
@@ -38,18 +39,14 @@ impl Display for Mutibility {
     }
 }
 
-impl<'a> TryFrom<&Block<'a>> for Mutibility {
+impl<'a> TryFrom<&mut Block<'a>> for Mutibility {
     type Error = WasmError;
 
-    fn try_from(_: &Block<'a>) -> std::result::Result<Self, Self::Error> {
-        // block.expect(BlockType::Mut)?;
-        // match block.content() {
-        //     Some(content) => Ok(Mutibility::Mut(ValueType::from_str(content)?)),
-        //     None => Err(WasmError::err(
-        //         "global type expected to be mutable, but found no type",
-        //     )),
-        // }
-        todo!()
+    fn try_from(block: &mut Block<'a>) -> std::result::Result<Self, Self::Error> {
+        block.expect(BlockType::Mut)?;
+        let value = block.pop_attribute_as_value_type()?;
+        block.should_be_empty()?;
+        Ok(Mutibility::Mut(value))
     }
 }
 
@@ -77,8 +74,8 @@ mod test {
 
     fn parse_block(string: &str) -> Result<Mutibility> {
         let mut source = crate::block::SubString::new(string);
-        let block = Block::parse(&mut source)?;
-        let mutibility = Mutibility::try_from(&block)?;
+        let mut block = Block::parse(&mut source)?;
+        let mutibility = Mutibility::try_from(&mut block)?;
         Ok(mutibility)
     }
 

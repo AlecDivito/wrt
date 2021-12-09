@@ -55,9 +55,15 @@ mod test {
 
     use super::*;
 
-    fn parse(program: &str) -> Result<Block> {
+    fn parse_block(program: &str) -> Result<Block> {
         let mut source = SubString::new(program);
         Block::parse(&mut source)
+    }
+
+    fn parse(source: &str) -> Result<TypeIdentifier> {
+        let mut block = parse_block(source)?;
+        let func = TypeIdentifier::try_from(&mut block)?;
+        Ok(func)
     }
 
     #[test]
@@ -72,8 +78,7 @@ mod test {
 
     #[test]
     fn parse_valid_type_identifier() {
-        let mut block = parse("(type (func))").unwrap();
-        let typeid = TypeIdentifier::try_from(&mut block).unwrap();
+        let typeid = parse("(type (func))").unwrap();
         assert!(typeid.id.is_none());
         assert!(typeid.func_type.parameters().is_empty());
         assert!(typeid.func_type.results().is_empty());
@@ -81,8 +86,7 @@ mod test {
 
     #[test]
     fn parse_valid_type_identifier_with_id() {
-        let mut block = parse("(type $id (func))").unwrap();
-        let typeid = TypeIdentifier::try_from(&mut block).unwrap();
+        let typeid = parse("(type $id (func))").unwrap();
         assert_eq!(typeid.id.unwrap(), Identifier::String("$id".to_string()));
         assert!(typeid.func_type.parameters().is_empty());
         assert!(typeid.func_type.results().is_empty());

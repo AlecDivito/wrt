@@ -47,7 +47,7 @@ impl<'a> TryFrom<&mut Block<'a>> for FuncParam {
     type Error = WasmError;
 
     fn try_from(block: &mut Block<'a>) -> std::result::Result<Self, Self::Error> {
-        block.expect(BlockType::Parameter)?;
+        block.expect_one(&[BlockType::Parameter, BlockType::Local])?;
 
         let mut id = block.take_id();
 
@@ -190,12 +190,24 @@ impl<'a> TryFrom<&'a mut Block<'a>> for FunctionType {
         block.expect(BlockType::Function)?;
         let parameters = FunctionType::get_parameters(block)?;
         let results = FunctionType::get_results(block)?;
-        block.should_be_empty()?;
 
-        Ok(Self {
-            parameters,
-            results,
-        })
+        let ids = parameters
+            .iter()
+            .filter_map(|p| p.id.as_ref())
+            .collect::<Vec<&Identifier>>();
+
+        if (1..ids.len()).any(|i| ids[i..].contains(&ids[i - 1])) {
+            Err(WasmError::err(
+                "Found duplicate ids in parameters. That is not allowed",
+            ))
+        } else {
+            block.should_be_empty()?;
+
+            Ok(Self {
+                parameters,
+                results,
+            })
+        }
     }
 }
 

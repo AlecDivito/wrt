@@ -2,7 +2,7 @@ use std::{convert::TryFrom, str::FromStr};
 
 use crate::{
     block::{BlockType, Identifier},
-    error::{Result, WasmError},
+    error::{Result, WasmError, WrapContext},
     values::func::{FuncParam, FunctionType},
     Block,
 };
@@ -319,7 +319,8 @@ impl<'a> TryFrom<&mut Block<'a>> for Function {
         block.expect(BlockType::Function)?;
 
         let id = block.take_id_or_attribute_as_identifier();
-        let type_id = FunctionType::try_from_block_allowing_other_children(block)?;
+        let type_id = FunctionType::try_from_block_allowing_other_children(block)
+            .wrap_context("parsing function type")?;
         let locals = block
             .take_children_that_are(BlockType::Local)
             .iter_mut()

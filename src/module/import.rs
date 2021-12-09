@@ -143,9 +143,13 @@ mod test {
 
     use super::*;
 
-    fn parse(program: &str) -> Result<Import> {
+    fn parse_block(program: &str) -> Result<Block> {
         let mut source = SubString::new(program);
-        let mut block = Block::parse(&mut source)?;
+        Block::parse(&mut source)
+    }
+
+    fn parse(program: &str) -> Result<Import> {
+        let mut block = parse_block(program)?;
         Import::try_from(&mut block)
     }
 
@@ -160,8 +164,14 @@ mod test {
     }
 
     #[test]
-    fn parse_import() {
-        let import = parse("(import \"lib\" \"test\")").unwrap();
+    fn parse_import_fails_because_no_child_declared() {
+        assert!(parse("(import \"lib\" \"test\")").is_err());
+    }
+
+    #[test]
+    fn parse_export_with_only_name_can_pass() {
+        let mut block = parse_block("(import \"lib\" \"test\")").unwrap();
+        let import = Import::try_from_block_without_description(&mut block, None, None).unwrap();
         assert_eq!(import.module, "lib");
         assert_eq!(import.name, "test");
     }

@@ -703,6 +703,14 @@ impl<'a> Block<'a> {
         }
     }
 
+    pub fn expect_one(&self, types: &[BlockType]) -> Result<()> {
+        if types.contains(&self.block_type) {
+            Ok(())
+        } else {
+            Err(WasmError::expected(types, &self.block_type))
+        }
+    }
+
     /// expect that the block is empty. If not, throw an error
     pub fn should_be_empty(&self) -> Result<()> {
         // self.names.is_empty() && self.attributes.is_empty() && self.children.is_empty()
@@ -893,7 +901,7 @@ impl<'a> Block<'a> {
         if self.content.is_empty() {
             None
         } else {
-            Some(self.content.join("\n"))
+            Some(self.content.drain(..).collect::<Vec<&str>>().join("\n"))
         }
     }
 

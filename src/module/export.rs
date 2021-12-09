@@ -107,9 +107,13 @@ mod test {
 
     use super::*;
 
-    fn parse(program: &str) -> Result<Export> {
+    fn parse_block(program: &str) -> Result<Block> {
         let mut source = SubString::new(program);
-        let mut block = Block::parse(&mut source)?;
+        Block::parse(&mut source)
+    }
+
+    fn parse(program: &str) -> Result<Export> {
+        let mut block = parse_block(program)?;
         Export::try_from(&mut block)
     }
 
@@ -119,9 +123,15 @@ mod test {
     }
 
     #[test]
-    fn parse_export() {
-        let export = parse("(export \"test\")").unwrap();
-        assert_eq!(export.name, "test");
+    fn parse_export_fails_because_no_child_declared() {
+        assert!(parse("(export \"test\")").is_err());
+    }
+
+    #[test]
+    fn parse_export_with_only_name_can_pass() {
+        let mut block = parse_block("(export \"test\")").unwrap();
+        let export = Export::try_from_block_without_description(&mut block, None).unwrap();
+        assert_eq!(export.name, "test")
     }
 
     #[test]
