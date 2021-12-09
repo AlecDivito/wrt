@@ -7,7 +7,7 @@ use crate::{
     Block,
 };
 
-use super::{export::Export, import::Import, instruction::Instruction};
+use super::{export::Export, import::Import, instruction::Instruction, types::TypeUse};
 
 // #[derive(Debug)]
 // pub struct Frame<'a> {
@@ -300,11 +300,17 @@ use super::{export::Export, import::Import, instruction::Instruction};
 //     }
 // }
 
+#[derive(Debug, PartialEq)]
+pub enum FuncUse {
+    TypeUse(TypeUse),
+    Anonymous(FunctionType),
+}
+
 #[derive(Debug)]
 pub struct Function {
     id: Option<Identifier>,
     locals: Vec<FuncParam>,
-    type_id: FunctionType, // can be anonomy or typed
+    type_use: FuncUse, // can be anonomy or typed
 
     // other things
     import: Option<Import>,
@@ -319,13 +325,26 @@ impl<'a> TryFrom<&mut Block<'a>> for Function {
         block.expect(BlockType::Function)?;
 
         let id = block.take_id_or_attribute_as_identifier();
-        let type_id = FunctionType::try_from_block_allowing_other_children(block)
-            .wrap_context("parsing function type")?;
+
         let locals = block
             .take_children_that_are(BlockType::Local)
             .iter_mut()
             .map(FuncParam::try_from)
             .collect::<Result<Vec<FuncParam>>>()?;
+
+        // 1. try to parse type use
+        let type_block = block.take_the_only_child_that_is(BlockType::Type)?;
+        let type_use = if let Some(mut child) = type_block {
+            FuncUse::TypeUse(TypeUse::try_from(&mut child)?)
+        }
+        // 2. otherwise, parse params and such
+        else {
+            let func_use = FunctionType::try_from_block_allowing_other_children(block)?;
+            for local in &locals {
+                local.compare_unique_ids(func_use.parameters())?;
+            }
+            FuncUse::Anonymous(func_use)
+        };
 
         let exports = block
             .take_children_that_are(BlockType::Export)
@@ -333,28 +352,21 @@ impl<'a> TryFrom<&mut Block<'a>> for Function {
             .map(|block| Export::try_from_block_without_description(block, None))
             .collect::<Result<Vec<Export>>>()?;
 
-        let mut imports = block
-            .take_children_that_are(BlockType::Import)
-            .iter_mut()
-            .map(|block| Import::try_from_block_without_description(block, None, None))
-            .collect::<Result<Vec<Import>>>()?;
-
-        let import = if let Some(import) = imports.pop() {
-            if imports.is_empty() {
-                Ok(Some(import))
-            } else {
-                Err(WasmError::err(format!(
-                    "expected at most 1 import, found {}",
-                    imports.len() + 1
-                )))
-            }?
-        } else {
-            None
-        };
+        let mut import = None;
+        if let Some(mut block) = block.take_the_only_child_that_is(BlockType::Import)? {
+            import.insert(Import::try_from_block_without_description(
+                &mut block, None, None,
+            )?);
+        }
 
         let instructions = if let Some(content) = block.take_content() {
-            content
+            let lines = content
                 .lines()
+                .map(|f| f.trim())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<&str>>();
+            lines
+                .into_iter()
                 .map(Instruction::from_str)
                 .collect::<Result<Vec<Instruction>>>()
         } else {
@@ -373,15 +385,11 @@ impl<'a> TryFrom<&mut Block<'a>> for Function {
             }
         }
 
-        for local in &locals {
-            local.compare_unique_ids(type_id.parameters())?;
-        }
-
         block.should_be_empty()?;
         Ok(Self {
             id,
             locals,
-            type_id,
+            type_use,
             import,
             exports,
             instructions,
@@ -407,7 +415,7 @@ mod test {
         let func = parse("(func)").unwrap();
         assert!(func.id.is_none());
         assert!(func.locals.is_empty());
-        assert_eq!(func.type_id, FunctionType::empty());
+        assert_eq!(func.type_use, FuncUse::Anonymous(FunctionType::empty()));
         assert!(func.instructions.is_empty());
         assert!(func.import.is_none());
         assert!(func.exports.is_empty());
@@ -419,7 +427,7 @@ mod test {
         assert!(func.id.is_none());
         assert_eq!(func.locals[0].value_type()[0], ValueType::I32(0));
         assert!(func.locals[0].id().is_none());
-        assert_eq!(func.type_id, FunctionType::empty());
+        assert_eq!(func.type_use, FuncUse::Anonymous(FunctionType::empty()));
         assert!(func.instructions.is_empty());
         assert!(func.import.is_none());
         assert!(func.exports.is_empty());
@@ -431,7 +439,7 @@ mod test {
         assert!(func.id.is_none());
         assert_eq!(func.locals[0].value_type()[0], ValueType::I32(0));
         assert!(func.locals[0].id().is_none());
-        assert_eq!(func.type_id, FunctionType::empty());
+        assert_eq!(func.type_use, FuncUse::Anonymous(FunctionType::empty()));
         assert_eq!(func.instructions.len(), 1);
         assert!(func.import.is_none());
         assert!(func.exports.is_empty());
@@ -443,7 +451,7 @@ mod test {
         assert_eq!(func.id.unwrap(), Identifier::String("$id".into()));
         assert_eq!(func.locals[0].value_type()[0], ValueType::I32(0));
         assert!(func.locals[0].id().is_none());
-        assert_eq!(func.type_id, FunctionType::empty());
+        assert_eq!(func.type_use, FuncUse::Anonymous(FunctionType::empty()));
         assert_eq!(func.instructions.len(), 1);
         assert!(func.import.is_none());
         assert!(func.exports.is_empty());
@@ -455,7 +463,7 @@ mod test {
         assert_eq!(func.id.unwrap(), Identifier::String("$id".into()));
         assert_eq!(func.locals[0].value_type()[0], ValueType::I32(0));
         assert!(func.locals[0].id().is_none());
-        assert_eq!(func.type_id, FunctionType::empty());
+        assert_eq!(func.type_use, FuncUse::Anonymous(FunctionType::empty()));
         assert_eq!(func.instructions.len(), 1);
         assert!(func.import.is_none());
         assert_eq!(func.exports[0], Export::new("test"));
@@ -480,7 +488,7 @@ mod test {
     fn func_with_id_export_and_import() {
         let func = parse("(func $id (export \"test\") (import \"a\" \"b\") )").unwrap();
         assert_eq!(func.id.unwrap(), Identifier::String("$id".into()));
-        assert_eq!(func.type_id, FunctionType::empty());
+        assert_eq!(func.type_use, FuncUse::Anonymous(FunctionType::empty()));
         assert!(func.instructions.is_empty());
         assert!(func.locals.is_empty());
         assert_eq!(func.import.unwrap(), Import::new("a", "b"));
@@ -495,10 +503,25 @@ mod test {
         assert_eq!(func.id.unwrap(), Identifier::String("$id".into()));
         assert_eq!(func.locals[0].value_type()[0], ValueType::I32(0));
         assert!(func.locals[0].id().is_none());
-        assert_eq!(func.type_id, FunctionType::empty());
+        assert_eq!(func.type_use, FuncUse::Anonymous(FunctionType::empty()));
         assert_eq!(func.instructions.len(), 1);
         assert!(func.import.is_none());
         assert_eq!(func.exports[0], Export::new("test"));
         assert_eq!(func.exports[1], Export::new("test2"));
+    }
+
+    #[test]
+    fn func_with_type_use() {
+        let func = parse("(func $id (type 0) (local i32) i32.const 42)").unwrap();
+        assert_eq!(func.id.unwrap(), Identifier::String("$id".into()));
+        assert_eq!(func.locals[0].value_type()[0], ValueType::I32(0));
+        assert!(func.locals[0].id().is_none());
+        assert_eq!(
+            func.type_use,
+            FuncUse::TypeUse(TypeUse::new(Identifier::Number(0)))
+        );
+        assert_eq!(func.instructions.len(), 1);
+        assert!(func.import.is_none());
+        assert!(func.exports.is_empty());
     }
 }

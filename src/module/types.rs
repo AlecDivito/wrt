@@ -36,6 +36,30 @@ impl<'a> TryFrom<&'a mut Block<'a>> for TypeIdentifier {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub struct TypeUse {
+    id: Identifier,
+}
+
+impl TypeUse {
+    pub fn new(id: Identifier) -> Self {
+        Self { id }
+    }
+}
+
+impl<'a> TryFrom<&'a mut Block<'a>> for TypeUse {
+    type Error = WasmError;
+
+    fn try_from(block: &'a mut Block<'a>) -> Result<Self, Self::Error> {
+        block.expect(BlockType::Type)?;
+        let id = block
+            .take_id_or_attribute_as_identifier()
+            .ok_or(WasmError::err("typeuse expects an identifer to exist"))?;
+        block.should_be_empty()?;
+        Ok(TypeUse { id })
+    }
+}
+
 impl Display for TypeIdentifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let content = if let Some(id) = &self.id {
@@ -60,6 +84,12 @@ mod test {
         Block::parse(&mut source)
     }
 
+    fn parse_type_use(source: &str) -> Result<TypeUse> {
+        let mut block = parse_block(source)?;
+        let func = TypeUse::try_from(&mut block)?;
+        Ok(func)
+    }
+
     fn parse(source: &str) -> Result<TypeIdentifier> {
         let mut block = parse_block(source)?;
         let func = TypeIdentifier::try_from(&mut block)?;
@@ -72,8 +102,25 @@ mod test {
     }
 
     #[test]
+    fn parse_only_type_use_identifier_fails() {
+        assert!(parse_type_use("(type)").is_err());
+    }
+
+    #[test]
     fn parse_type_identifier_with_mulitple_ids_fails() {
         assert!(parse("(type $id1 $id2)").is_err());
+    }
+
+    #[test]
+    fn parse_string_type_id() {
+        let type_use = parse_type_use("(type $id)").unwrap();
+        assert_eq!(type_use.id, Identifier::String("$id".into()));
+    }
+
+    #[test]
+    fn parse_number_type_id() {
+        let type_use = parse_type_use("(type 0)").unwrap();
+        assert_eq!(type_use.id, Identifier::Number(0));
     }
 
     #[test]

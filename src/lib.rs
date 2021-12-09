@@ -1,4 +1,6 @@
-use block::Block;
+use std::convert::TryFrom;
+
+use block::{Block, SubString};
 use module::module::Module;
 use values::value::ValueType;
 
@@ -97,12 +99,11 @@ impl Engine {
         Self {}
     }
 
-    pub fn compile(&self /*text: &str*/) -> Result<Module> {
-        todo!();
-        // let mut program_str = SubString::new(text);
-        // let program = Block::parse(&mut program_str)?;
-        // program.walk(None);
-        // Module::build(program)
+    pub fn compile(text: &str) -> Result<Module> {
+        let mut program_str = SubString::new(text);
+        let program = Block::parse(&mut program_str)?;
+        println!("{}", program);
+        Module::try_from(program)
     }
 
     pub fn compile_and_run(/*text: &str, func: &str, args: &[ValueType]*/) -> Result<Vec<ValueType>>

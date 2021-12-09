@@ -752,6 +752,23 @@ impl<'a> Block<'a> {
         items
     }
 
+    pub fn take_the_only_child_that_is(&mut self, block_type: BlockType) -> Result<Option<Block>> {
+        let mut blocks = self.take_children_that_are(block_type.clone());
+        if let Some(block) = blocks.pop() {
+            if blocks.is_empty() {
+                Ok(Some(block))
+            } else {
+                Err(WasmError::err(format!(
+                    "expected at most 1 block of {}, found {}",
+                    block_type,
+                    blocks.len() + 1
+                )))
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn take_children_that_are_opcodes(&mut self) -> Vec<Block> {
         let mut i = 0;
         let mut items = vec![];
