@@ -29,12 +29,18 @@ impl<'a> TryFrom<&mut &mut Block<'a>> for Limit {
     type Error = WasmError;
 
     fn try_from(block: &mut &mut Block<'a>) -> std::result::Result<Self, Self::Error> {
-        let max = block.pop_attribute()?.as_num()?.parse::<u32>()?;
-        if let Ok(attr) = block.pop_attribute() {
-            let min = attr.as_num()?.parse::<u32>()?;
-            Ok(Self::max(min, max))
+        if let Ok(first) = block.pop_attribute() {
+            let max = first.as_num()?.parse::<u32>()?;
+            if let Ok(attr) = block.pop_attribute() {
+                let min = attr.as_num()?.parse::<u32>()?;
+                Ok(Self::max(min, max))
+            } else {
+                Ok(Self::min(max))
+            }
+        } else if let Some(c) = block.take_content() {
+            Limit::from_str(&c)
         } else {
-            Ok(Self::min(max))
+            Err(WasmError::err("limits not found in content or attributes"))
         }
     }
 }

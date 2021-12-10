@@ -9,13 +9,13 @@ use crate::{
 use super::{data::DataString, export::Export, import::Import};
 
 pub struct MemoryUse {
-    id: Option<Identifier>,
+    pub id: Identifier,
 }
 
 impl Default for MemoryUse {
     fn default() -> Self {
         Self {
-            id: Some(Identifier::Number(0)),
+            id: Identifier::Number(0),
         }
     }
 }
@@ -25,7 +25,9 @@ impl<'a> TryFrom<&mut Block<'a>> for MemoryUse {
 
     fn try_from(block: &mut Block<'a>) -> std::result::Result<Self, Self::Error> {
         block.expect(BlockType::Memory)?;
-        let id = block.take_id_or_attribute_as_identifier();
+        let id = block
+            .take_id_or_attribute_as_identifier()
+            .ok_or(WasmError::err("an idenifer is required when using memory"))?;
         block.should_be_empty()?;
         Ok(Self { id })
     }

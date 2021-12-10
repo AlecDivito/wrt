@@ -160,7 +160,7 @@ impl<'a> SubString<'a> {
         self.eat_token(SubString::is_whitespace);
         if let Some(token) = self
             .eat_token_until(
-                SubString::is_valid_block_type,
+                SubString::is_valid_instruction,
                 SubString::is_whitespace_or_end_block,
             )
             .wrap_err("failed to eat instruction token")?
@@ -467,6 +467,13 @@ impl<'a> Attribute<'a> {
             Err(WasmError::err("expected number attribute, found string"))
         }
     }
+
+    pub fn value(&self) -> &'a str {
+        match self {
+            Attribute::Str(v) => *v,
+            Attribute::Num(v) => *v,
+        }
+    }
 }
 
 impl<'a> Display for Attribute<'a> {
@@ -599,6 +606,18 @@ impl<'a> Block<'a> {
                 source.eat()?;
             }
         }
+        let content = source.breakpoint_content().unwrap_or("");
+        if !content.is_empty() {
+            block.content.push(content);
+        }
+
+        let mut vec = vec![];
+        while let Some(content) = block.content.pop() {
+            if !content.trim().is_empty() {
+                vec.push(content);
+            }
+        }
+        block.content = vec;
         Ok(())
     }
 
@@ -685,9 +704,10 @@ impl<'a> Block<'a> {
                 source.eat()?;
             }
         }
-        block
-            .content
-            .push(source.breakpoint_content().unwrap_or(""));
+        let content = source.breakpoint_content().unwrap_or("");
+        if !content.is_empty() {
+            block.content.push(content);
+        }
 
         let mut vec = vec![];
         while let Some(content) = block.content.pop() {

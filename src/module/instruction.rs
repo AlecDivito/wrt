@@ -82,7 +82,19 @@ impl<'a> TryFrom<Block<'a>> for Instruction {
     type Error = WasmError;
 
     fn try_from(mut block: Block<'a>) -> std::result::Result<Self, Self::Error> {
-        let content = block.take_content().unwrap_or(String::new());
+        let content = if let Ok(attr) = block.pop_attribute() {
+            let mut items = vec![attr.value()];
+            while let Ok(a) = block.pop_attribute() {
+                items.push(a.value());
+            }
+            items.reverse();
+            items.join(" ")
+        } else if let Some(c) = block.take_content() {
+            c
+        } else {
+            String::new()
+        };
+
         let items = content.split("\n").collect();
         block.should_be_empty()?;
         if let BlockType::Opcode(opcode) = block.type_id() {
@@ -94,6 +106,10 @@ impl<'a> TryFrom<Block<'a>> for Instruction {
 }
 
 impl Instruction {
+    pub fn new(opcode: Opcode, oprands: Vec<Oprand>) -> Self {
+        Self { opcode, oprands }
+    }
+
     fn pop<'a>(opcode: &Opcode, items: &mut Vec<&'a str>) -> Result<&'a str> {
         items.pop().ok_or(WasmError::err(format!(
             "expected item for opcode {}, found none",

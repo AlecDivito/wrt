@@ -11,7 +11,7 @@ use super::instruction::Instruction;
 use super::mem::MemoryUse;
 
 pub struct DataString {
-    data: Vec<u8>,
+    pub data: Vec<u8>,
 }
 
 impl DataString {
@@ -19,6 +19,12 @@ impl DataString {
         // TODO(Alec): This may break
         let min = self.data.len() as u32 / 65536;
         Limit::min(min)
+    }
+
+    fn new(name: &str) -> DataString {
+        Self {
+            data: name.as_bytes().to_vec(),
+        }
     }
 }
 
@@ -62,12 +68,27 @@ impl<'a> TryFrom<&mut Block<'a>> for Offset {
 
     fn try_from(block: &mut Block<'a>) -> Result<Self, Self::Error> {
         block.expect(BlockType::Offset)?;
-        let mut str = vec![];
-        while let Ok(attr) = block.pop_attribute() {
-            str.push(attr.to_string());
-        }
-        let expr = str.join(" ");
-        let instruction = Instruction::from_str(&expr)?;
+
+        let mut codes = block.take_children_that_are_opcodes();
+
+        let instruction = if let Some(code) = codes.pop() {
+            let i = Instruction::try_from(code)?;
+            if !codes.is_empty() {
+                Err(WasmError::err(
+                    "expected there to only be one opcode, found more then one",
+                ))
+            } else {
+                Ok(i)
+            }
+        } else {
+            let mut str = vec![];
+            while let Ok(attr) = block.pop_attribute() {
+                str.push(attr.to_string());
+            }
+            let expr = str.join(" ");
+            Instruction::from_str(&expr)
+        }?;
+
         block.should_be_empty()?;
         Ok(Self { instruction })
     }
@@ -82,6 +103,24 @@ pub struct ActiveData {
 pub enum Modes {
     Passive(DataString),
     Active(ActiveData),
+}
+
+impl Modes {
+    pub fn as_passive(&self) -> Option<&DataString> {
+        if let Self::Passive(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_active(&self) -> Option<&ActiveData> {
+        if let Self::Active(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
 }
 
 pub struct Data {
@@ -112,11 +151,11 @@ impl<'a> TryFrom<&mut Block<'a>> for Data {
                 } else {
                     MemoryUse::default()
                 };
-            let data = DataString::from_str(
-                &block
-                    .take_content()
-                    .ok_or(WasmError::err("expected content, found nothing"))?,
-            )?;
+            let data = if let Some(name) = block.pop_name() {
+                DataString::new(name)
+            } else {
+                return Err(WasmError::err("expected name with data; found nothing"));
+            };
             Modes::Active(ActiveData {
                 mem_use,
                 offset: offset.unwrap(),
@@ -133,6 +172,8 @@ impl<'a> TryFrom<&mut Block<'a>> for Data {
 mod test {
     use crate::block::SubString;
     use crate::error::Result;
+    use crate::module::instruction::{Opcode, Oprand};
+    use crate::values::value::ValueType;
 
     use super::*;
 
@@ -145,20 +186,37 @@ mod test {
     #[test]
     fn simple_data_block() {
         let data = parse("(data \"this is data\")").unwrap();
+        assert_eq!(
+            data.mode.as_passive().unwrap().data,
+            "this is data".as_bytes().to_vec()
+        );
     }
 
     #[test]
     fn simple_data_block_with_id() {
         let data = parse("(data $id \"this is data\")").unwrap();
+        assert_eq!(data.id.unwrap(), Identifier::String("$id".into()));
+        assert_eq!(
+            data.mode.as_passive().unwrap().data,
+            "this is data".as_bytes().to_vec()
+        );
     }
 
     #[test]
     fn data_with_memory_use() {
         let data = parse("(data (memory 0) (offset (i32.const 0)) \"this is data\")").unwrap();
+        let active = data.mode.as_active().unwrap();
+        assert_eq!(active.mem_use.id, Identifier::Number(0));
+        assert_eq!(
+            active.offset.instruction,
+            Instruction::new(Opcode::I32Const, vec![Oprand::Value(ValueType::I32(0))])
+        );
+        assert_eq!(active.data.data, "this is data".as_bytes().to_vec());
     }
 
     #[test]
     fn data_with_memory_use_with_id() {
         let data = parse("(data $id (memory 0) (offset (i32.const 0)) \"this is data\")").unwrap();
+        assert_eq!(data.id.unwrap(), Identifier::String("$id".into()));
     }
 }
