@@ -2,21 +2,106 @@ use std::{fmt::Display, str::FromStr};
 
 use crate::error::WasmError;
 
-use super::func::FunctionType;
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum RefType {
-    FuncRef(FunctionType),
-    ExternRef(),
+/// Classify Imports and external values with their respective types
+pub enum ExternalType {
+    Func(FuncType),
+    Table(TableType),
+    Mem(MemType),
+    Global(GlobalType),
 }
 
+
+/// [GlobalType] hold a global value
+pub enum GlobalType {
+    // Immutiable global value
+    Const(ValueType),
+    // Mutable global value
+    Var(ValueType),
+}
+
+/// Classify ["Table"] over elements of ["RefType"] within the size range.
+/// 
+/// Note: The type must contain only the one type of RefType... (maybe)
+/// TODO(Alec): Validate...
+/// 
+/// Like ["Memory"] tables have a size limit.
+pub struct TableType {
+    limit: Limit,
+    ref_type: RefType,
+}
+
+/// Classify linear ['Memories'] and their size range.
+/// 
+/// Contains the min and max of memory size, given in units of Page Size.
+pub struct MemType(Limit);
+
+/// ["Limit"] size range of resizable storage. Associated with ["Memory"] and 
+/// ["Table"] types. Max is optional.
+pub struct Limit {
+    min: u32,
+    max: Option<u32>
+}
+
+/// ["FuncType"] is a classification signature of a function. It maps a vector
+/// of result types (as parameters) to return types (as the return value).
+/// 
+/// They are also used to classify the input and outpus of ["Instructions"].
+pub struct FuncType(Box<dyn Fn(ResultType) -> ResultType>);
+
+/// ["ResultType"] contains the return values from exiting instructions or calling
+/// a function. Its a sequence of values
+pub struct ResultType(Vec<ValueType>);
+
+// FunctionType is just a pointer to a function
+type FunctionType = i32;
+// ExternRef is just a pointer to a object
+type ExternRef = i32;
+
+/// ValueType are inddividual values that wasm can compute and a value that a
+/// variable can use.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValueType {
-    I32(i32),
+    Num(NumType),
+    VecType(VecType),
+    RefType(RefType),
+}
+
+/// First class references to objects in the runtime ["Store"].
+/// 
+/// Reference types are opaque, meaning that neither their size nor their bit
+/// pattern can be observed. Values of reference type can be stored in ["Tables"]
+#[derive(Debug, Clone, PartialEq)]
+pub enum RefType {
+    // FunctionType must exist, however, we don't know what it takes and we don't
+    // know what it returns. The Function must exist in the program.
+    FuncRef(FunctionType),
+    // A reference to a host resource. The resource should be owned by the ["Embedder"].
+    // This is a type of pointer.
+    ExternRef(ExternRef),
+}
+
+/// Vector types classify numeric values processed by SIMD instructions.
+/// Also known as v128. It can be interperted as signed or unsigned,
+/// floating point, integer numbers or a single 128 bit type.
+/// 
+/// These are transparent (like ["NumType"]), meaning their bit patterns can
+/// be observed. Values of vector type can be stored in memory
+#[derive(Debug, Clone, PartialEq)]
+pub struct VecType([u8; 16]);
+// TODO(Alec): Implement all the permutations of VecType. Because the value
+// is "transparent"
+
+pub type Boolean = ValueType::I32();
+pub type Pointer = ValueType::I32();
+
+/// Number types are transparent, meaning that their bit patterns can be observed.
+/// Values of number type can be stored in ["Memory"].
+#[derive(Debug, Clone, PartialEq)]
+pub enum NumType {
+    I32(i32), // servers as Booleans and Memory Addresses
     I64(i64),
     F32(f32),
     F64(f64),
-    // RefType(RefType)
 }
 
 impl ValueType {
