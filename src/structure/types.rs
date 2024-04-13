@@ -1,6 +1,14 @@
-
-
 use crate::validation::{Context, Validation, ValidationError};
+
+/// Type of sign an integer is meant to taken as
+///
+/// Some integer instructions come in two flavors, where a signedness distinguishes
+/// whether the operands are to be interpreted as signed or unsigned. Use two compliment
+/// for signed interpretation means that they behave the same regardless of signedness
+pub enum SignType {
+    Signed,
+    Unsigned,
+}
 
 pub enum BlockType {
     Index(TypeIndex),
@@ -8,13 +16,12 @@ pub enum BlockType {
 }
 
 impl Validation<FuncType> for BlockType {
-
     fn validate(&self, ctx: &Context, args: FuncType) -> Result<(), ValidationError> {
         match self {
             BlockType::Index(index) => ctx
                 .get_type(*index)
                 .and_then(|ty| if *ty == args { Some(ty) } else { None })
-                .ok_or_else(|| ValidationError::new())
+                .ok_or_else(ValidationError::new)
                 .map(|_| ()),
             // This one is always ok, because the type is defined on the block type
             // already meaning that if we have parsed it, it's valid...
@@ -32,8 +39,6 @@ pub type ElementIndex = u32;
 pub type DataIndex = u32;
 pub type LocalIndex = u32;
 pub type LabelIndex = u32;
-
-
 
 /// Classify Imports and external values with their respective types
 pub enum ExternalType {
@@ -55,6 +60,7 @@ impl Validation<()> for ExternalType {
 }
 
 /// [GlobalType] hold a global value
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GlobalType {
     // Immutiable global value
     Const(ValueType),
@@ -65,6 +71,16 @@ pub enum GlobalType {
 impl Validation<()> for GlobalType {
     fn validate(&self, _: &Context, _: ()) -> Result<(), ValidationError> {
         Ok(())
+    }
+}
+
+impl Validation<GlobalType> for GlobalType {
+    fn validate(&self, _: &Context, g2: GlobalType) -> Result<(), ValidationError> {
+        if *self == g2 {
+            Ok(())
+        } else {
+            Err(ValidationError::new())
+        }
     }
 }
 
@@ -80,7 +96,6 @@ pub struct TableType {
 }
 
 impl Validation<()> for TableType {
-
     fn validate(&self, ctx: &Context, _: ()) -> Result<(), ValidationError> {
         let max = 2_u32.pow(32) - 1;
         self.limit.validate(ctx, max)?;
@@ -89,17 +104,33 @@ impl Validation<()> for TableType {
     }
 }
 
+impl Validation<TableType> for TableType {
+    fn validate(&self, ctx: &Context, t2: TableType) -> Result<(), ValidationError> {
+        if self.ref_type == t2.ref_type {
+            self.limit.validate(ctx, t2.limit)
+        } else {
+            Err(ValidationError::new())
+        }
+    }
+}
+
 /// Classify linear ['Memories'] and their size range.
 ///
 /// Contains the min and max of memory size, given in units of Page Size.
 pub struct MemoryType {
-    limit: Limit
+    limit: Limit,
 }
 
 impl Validation<()> for MemoryType {
     fn validate(&self, ctx: &Context, _: ()) -> Result<(), ValidationError> {
         let max = 2_u32.pow(16);
         self.limit.validate(ctx, max)
+    }
+}
+
+impl Validation<MemoryType> for MemoryType {
+    fn validate(&self, ctx: &Context, args: MemoryType) -> Result<(), ValidationError> {
+        self.limit.validate(ctx, args.limit)
     }
 }
 
@@ -111,15 +142,12 @@ pub struct Limit {
 }
 
 impl Validation<u32> for Limit {
-
     /// Validate the limit is within range of K.
     fn validate(&self, _ctx: &Context, k: u32) -> Result<(), ValidationError> {
         if self.min > k {
             Err(ValidationError::new())
         } else if let Some(max) = self.max.as_ref() {
-            if *max > k {
-                Err(ValidationError::new())
-            } else if self.min > *max {
+            if *max > k || self.min > *max {
                 Err(ValidationError::new())
             } else {
                 Ok(())
@@ -131,7 +159,21 @@ impl Validation<u32> for Limit {
 }
 
 impl Validation<Limit> for Limit {
-    fn validate(&self, ctx: &Context, args: Limit) -> Result<(), ValidationError> {
+    fn validate(&self, _: &Context, args: Limit) -> Result<(), ValidationError> {
+        let min_invalid = self.min < args.min;
+        if let (Some(max1), Some(max2)) = (&self.max, &args.max) {
+            if *max1 > *max2 || min_invalid {
+                Err(ValidationError::new())
+            } else {
+                Ok(())
+            }
+        } else if min_invalid {
+            // https://webassembly.github.io/spec/core/valid/types.html#import-subtyping
+            // Imported limit must less then or equal to current limit
+            Err(ValidationError::new())
+        } else {
+            Ok(())
+        }
         // https://webassembly.github.io/spec/core/valid/types.html
     }
 }
@@ -149,9 +191,19 @@ pub struct FuncType {
 }
 
 impl Validation<()> for FuncType {
-
     fn validate(&self, _: &Context, _: ()) -> Result<(), ValidationError> {
         Ok(())
+    }
+}
+
+impl Validation<FuncType> for FuncType {
+    fn validate(&self, _: &Context, f2: FuncType) -> Result<(), ValidationError> {
+        // Both funcTypes must be equal, otherwise error
+        if *self == f2 {
+            Ok(())
+        } else {
+            Err(ValidationError::new())
+        }
     }
 }
 
@@ -172,6 +224,32 @@ pub enum ValueType {
     Num(NumType),
     VecType(VecType),
     RefType(RefType),
+}
+
+impl ValueType {
+    /// Returns `true` if the value type is [`Num`].
+    ///
+    /// [`Num`]: ValueType::Num
+    #[must_use]
+    pub fn is_num(&self) -> bool {
+        matches!(self, Self::Num(..))
+    }
+
+    /// Returns `true` if the value type is [`VecType`].
+    ///
+    /// [`VecType`]: ValueType::VecType
+    #[must_use]
+    pub fn is_vec_type(&self) -> bool {
+        matches!(self, Self::VecType(..))
+    }
+
+    /// Returns `true` if the value type is [`RefType`].
+    ///
+    /// [`RefType`]: ValueType::RefType
+    #[must_use]
+    pub fn is_ref_type(&self) -> bool {
+        matches!(self, Self::RefType(..))
+    }
 }
 
 /// First class references to objects in the runtime ["Store"].
@@ -204,7 +282,7 @@ pub type Pointer = i32;
 
 /// Number types are transparent, meaning that their bit patterns can be observed.
 /// Values of number type can be stored in ["Memory"].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NumType {
     I32, // servers as Booleans and Memory Addresses
     I64,

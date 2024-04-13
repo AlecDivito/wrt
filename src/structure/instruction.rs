@@ -1,12 +1,55 @@
 //! Wasm consists of a sequence of instructions. It uses a stack machine to manupulate
 //! values on an implicit operand stack. It consumes (pops) values and processes
 //! them and returns (push) the result.
-//! 
+//!
 //! In addition, some instructions have static _immediate arguments_. Typically
 //! Indices or Type annotations.
 
+use crate::validation::ValidationError;
+
+use super::types::{NumType, ValueType};
+
 // A list of instruction with a mark of "end" to mark the end of the expression.
 pub type Expression = Vec<Instruction>;
+
+/// [StackType]s are like [FunctionType]s. Except, thye allow individual operands
+/// to be classified as (bottom). It indicates that the type is unconstrained.
+///
+/// Some typing rules do not fully constrain the type, which therefore allow multiple
+/// types. These instructions are called polymorphic:
+/// 1. _value-polymorhpic_: Parametric instructions like `drop` and `select`. Value type of 1 or several values.
+/// 2. _stack-polymorphic_: All or most values are unconstrained. Used in control instructions like `unreachable`, `br`, `br_table`, `return`
+///
+/// You can think of the StackType as one command. For example, the following is
+/// a stack type.
+///
+/// ```wasm
+/// i32.add <-- instruction
+/// Input Operand [i32, i32]
+/// Output Operand [i32]
+/// ```
+pub struct StackType {
+    // Describe the required input stack. Instructions pop off from this stack.
+    inputs: Vec<OperandType>,
+    // Output stack that is pushed too.
+    outputs: Vec<OperandType>,
+}
+
+pub enum OperandType {
+    Value(ValueType),
+    // Stack types allow for individual operands to be classified as ⊥ (bottom).
+    // It indicates that the type is unconstrained.
+    Unconstrained,
+}
+
+impl PartialEq for OperandType {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Value(left), Self::Value(right)) => left == right,
+            _ => true,
+        }
+    }
+}
 
 pub enum Instruction {
     Numeric(NumericInstruction),
@@ -18,7 +61,6 @@ pub enum Instruction {
     Memory(MemoryInstruction),
     Control(ControlInstruction),
 }
-
 
 pub enum NumericInstruction {
     // Constant. Return a static constant
@@ -35,7 +77,7 @@ pub enum NumericInstruction {
     I64Clz,
     I64Ctz,
     I64PopCnt,
-    
+
     F32Abs,
     F32Neg,
     F32Sqrt,
@@ -196,7 +238,6 @@ pub enum NumericInstruction {
     ReinterpretI64IntoF64,
 }
 
-
 /**
  * ## Vector instructions can be grouped into several subcategories:
  * Constants: return a static constant.
@@ -226,7 +267,7 @@ pub enum VectorInstruction {
     V128AnyTrue,
     // vvtestop
     V128AllTrue,
-     
+
     V128ShuffleI8x16, // takes u8 as id
     V128SwizzleI8x16,
 
@@ -239,16 +280,16 @@ pub enum VectorInstruction {
     V128SplatF64x2,
 
     // Extract Lane (get values from V128)
-    V128ExtractLaneSignedI8x16, // takes u8 as id
+    V128ExtractLaneSignedI8x16,   // takes u8 as id
     V128ExtractLaneUnsignedI8x16, // takes u8 as id
 
-    V128ExtractLaneSignedI16x8, // takes u8 as id
+    V128ExtractLaneSignedI16x8,   // takes u8 as id
     V128ExtractLaneUnsignedI16x8, // takes u8 as id
 
-    V128ExtractLaneSignedI32x4, // takes u8 as id
+    V128ExtractLaneSignedI32x4,   // takes u8 as id
     V128ExtractLaneUnsignedI32x4, // takes u8 as id
 
-    V128ExtractLaneSignedI64x2, // takes u8 as id
+    V128ExtractLaneSignedI64x2,   // takes u8 as id
     V128ExtractLaneUnsignedI64x2, // takes u8 as id
 
     V128ExtractLaneF32x4, // takes u8 as id
@@ -302,7 +343,7 @@ pub enum VectorInstruction {
     V128GreaterThenSignedI64x2,
     V128LessOrEqualSignedI64x2,
     V128GreaterOrEqualSignedI64x2,
-    
+
     // vfelop (RelOp)
     V128EqualF64x2,
     V128NotEqualF64x2,
@@ -331,7 +372,7 @@ pub enum VectorInstruction {
 
     // popcnt (Unary)
     V128PopCntI8x16,
-    
+
     // q15mulr_sat (Binary operation)
     V128Q15MulrSatSignedI16x8,
 
@@ -410,7 +451,7 @@ pub enum VectorInstruction {
     V128AddI16x8,
     V128AddI32x4,
     V128AddI64x2,
-    
+
     V128SubtractI8x16,
     V128SubtractI16x8,
     V128SubtractI32x4,
@@ -452,7 +493,7 @@ pub enum VectorInstruction {
     V128AverageUnsignedI8x16,
     V128AverageUnsignedI16x8,
 
-    // extmul 
+    // extmul
     V128ExtendAndMultiplyHighI8x16ToI16x8Signed,
     V128ExtendAndMultiplyHighI8x16ToI16x8Unsigned,
     V128ExtendAndMultiplyLowI8x16ToI16x8Signed,
@@ -497,7 +538,7 @@ pub enum VectorInstruction {
     // trunc_sat (vcvtop)
     V128TruncateSatF32x4ToI32x4Signed,
     V128TruncateSatF32x4ToI32x4Unsigned,
-    
+
     V128TruncateSatF62x2ToI32x4SignedZero,
     V128TruncateSatF62x2ToI32x4UnsignedZero,
 
@@ -512,7 +553,6 @@ pub enum VectorInstruction {
 
     V128PromoteLowF32x4ToF64x2,
 }
-
 
 /// Instructions produce a null value, check null value or produce a reference to
 /// a given function.
@@ -529,7 +569,7 @@ pub enum ParametricInstruction {
     // Select one of it's first two operands based on whether it's third operand is
     // zero or not. May include a ['ValueType'] determining the type of these
     // operands. If missing, the operands must be of numeric type
-    Select,  // (valtype*)?
+    Select, // (valtype*)?
 }
 
 /// Access local or global variables. Get or set values respectively
@@ -571,30 +611,30 @@ pub enum TableInstruction {
 /// Memory is accessed with load and store instructions for different ['NumberTypes']
 /// They all take memarg which is the address offset and the expected alignment
 /// (expressed as the exponent of a power of 2).
-/// 
+///
 /// Integer loads and store can optional specify a storage size that is smaller
 /// than the bit width of the respective value type.
-/// 
+///
 /// Vector loads can specify a shape that is half the width of a V128. A "splat"
 /// uses a single lane of specified storage size is loaded and duplicated to all
 /// lanes.
-/// 
+///
 /// Static address offset is added to dynamic address operand, yielding 33 bit
 /// effective address that is zero based index at which the memory is accessed.
 /// All values are read and written in little endian byte order. A trap results if
 /// any accessed memory bytes lies outside the address range implied by the memories
-/// current size. 
+/// current size.
 pub enum MemoryInstruction {
-    LoadI32, // { offset u32, align u32 }
-    LoadI64, // { offset u32, align u32 }
-    LoadF32, // { offset u32, align u32 }
-    LoadF64, // { offset u32, align u32 }
+    LoadI32,  // { offset u32, align u32 }
+    LoadI64,  // { offset u32, align u32 }
+    LoadF32,  // { offset u32, align u32 }
+    LoadF64,  // { offset u32, align u32 }
     LoadV128, // { offset u32, align u32 }
 
-    StoreI32, // { offset u32, align u32 }
-    StoreI64, // { offset u32, align u32 }
-    StoreF32, // { offset u32, align u32 }
-    StoreF64, // { offset u32, align u32 }
+    StoreI32,  // { offset u32, align u32 }
+    StoreI64,  // { offset u32, align u32 }
+    StoreF32,  // { offset u32, align u32 }
+    StoreF64,  // { offset u32, align u32 }
     StoreV128, // { offset u32, align u32 }
 
     // load
@@ -675,7 +715,7 @@ pub enum ControlInstruction {
     // implicit label. Labels are targets for branch instructions that reference
     // them with label indices. Label indexes are relative to nesting depth. Ex.
     // 0 refers to the innermost structured control instruction. Increasing indices
-    // refer to farther out. 
+    // refer to farther out.
     Block, // block ([TypeIndex] | [ValueType]?) [Instruction]* end
     Loop,  // loop  ([TypeIndex] | [ValueType]?) [Instruction]* end
     If,    // if    ([TypeIndex] | [ValueType]?) [Instruction]* else [Instruction]* end
@@ -702,5 +742,4 @@ pub enum ControlInstruction {
     // table index must be a [FunctionReference]. Function is dynamically checked
     // against the function type.
     CallIndirect, // Table index, type index
-
 }
