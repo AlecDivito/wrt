@@ -2,6 +2,16 @@ use std::{fmt::Display, str::FromStr};
 
 use crate::error::WasmError;
 
+pub type TypeIndex = u32;
+pub type FunctionIndex = u32;
+pub type TableIndex = u32;
+pub type MemoryIndex = u32;
+pub type GlobalIndex = u32;
+pub type ElementIndex = u32;
+pub type DataIndex = u32;
+pub type LocalIndex = u32;
+pub type LabelIndex = u32;
+
 /// Classify Imports and external values with their respective types
 pub enum ExternalType {
     Func(FuncType),
@@ -91,8 +101,8 @@ pub struct VecType([u8; 16]);
 // TODO(Alec): Implement all the permutations of VecType. Because the value
 // is "transparent"
 
-pub type Boolean = ValueType::I32();
-pub type Pointer = ValueType::I32();
+pub type Boolean = i32;
+pub type Pointer = i32;
 
 /// Number types are transparent, meaning that their bit patterns can be observed.
 /// Values of number type can be stored in ["Memory"].
