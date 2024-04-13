@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use block::{Block, SubString};
 use module::{function::Frame, instruction::Instruction, module::Module};
-use values::value::ValueType;
+use structure::types::ValueType;
 
 use crate::error::{Result, WasmError};
 
@@ -120,3 +120,5 @@ mod block;
 pub mod error;
 pub mod module;
 pub mod values;
+pub mod structure;
+pub mod validation;

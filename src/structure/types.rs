@@ -16,7 +16,7 @@ pub type LabelIndex = u32;
 pub enum ExternalType {
     Func(FuncType),
     Table(TableType),
-    Mem(MemType),
+    Mem(MemoryType),
     Global(GlobalType),
 }
 
@@ -43,7 +43,7 @@ pub struct TableType {
 /// Classify linear ['Memories'] and their size range.
 /// 
 /// Contains the min and max of memory size, given in units of Page Size.
-pub struct MemType(Limit);
+pub struct MemoryType(Limit);
 
 /// ["Limit"] size range of resizable storage. Associated with ["Memory"] and 
 /// ["Table"] types. Max is optional.
@@ -63,9 +63,9 @@ pub struct FuncType(Box<dyn Fn(ResultType) -> ResultType>);
 pub struct ResultType(Vec<ValueType>);
 
 // FunctionType is just a pointer to a function
-type FunctionType = i32;
+pub type FunctionType = i32;
 // ExternRef is just a pointer to a object
-type ExternRef = i32;
+pub type ExternRef = i32;
 
 /// ValueType are inddividual values that wasm can compute and a value that a
 /// variable can use.
