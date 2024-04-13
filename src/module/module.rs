@@ -5,7 +5,7 @@ use crate::{
     Block,
 };
 
-use super::{export::Export, function::Function, global::Global, import::Import};
+use super::{export::{Export, Identifier}, function::Function, global::Global, import::Import};
 
 #[derive(Debug)]
 pub struct Module {
@@ -13,12 +13,12 @@ pub struct Module {
     // funcs: Vec<Func>
     // tables: Vec<Table>
     // memories: Vec<Memory>
-    // globals: Vec<Global>,
+    globals: Vec<Global>,
     // elements: Vec<Element>
     // datas: Vec<Data>
     // start: Option<Start>
-    // exports: Vec<Export>,
-    // functions: Vec<Function>,
+    exports: Vec<Export>,
+    functions: Vec<Function>,
 }
 
 impl Module {
@@ -48,7 +48,7 @@ impl Module {
                         module.exports.insert(export.id(), export);
                     }
                     BlockType::Import => match Import::build(child)? {
-                        ImportDefinition::Function(f) => module.functions.push(f),
+                        // ImportDefinition::Function(f) => module.functions.push(f),
                     },
                     _ => {
                         return Err(WasmError::new(

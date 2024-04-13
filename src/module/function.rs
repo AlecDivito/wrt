@@ -1,13 +1,7 @@
 use std::{convert::TryFrom, str::FromStr};
 
 use crate::{
-    block::BlockType,
-    error::{Result, WasmError},
-    values::{
-        func::{FuncParam, FunctionType},
-        value::ValueType,
-    },
-    Block,
+    block::BlockType, error::{Result, WasmError}, structure::types::ValueType, values::func::{FuncParam, FunctionType}, Block
 };
 
 use super::{export::Export, import::Import, instruction::Instruction};
@@ -341,7 +335,7 @@ impl<'a> TryFrom<&Block<'a>> for Function {
                 }
                 Export => {
                     let export = super::export::Export::try_from(child)?;
-                    if let Some(e) = exports {
+                    if let Some(mut e) = exports {
                         e.push(export);
                     } else {
                         exports.insert(vec![export]);

@@ -28,9 +28,20 @@
 //! elsewhere. THe label stack is only part of the context that changes as validation
 //! of the instruction sequence proceeds.
 //! 
-//! Continue reading: https://webassembly.github.io/spec/core/valid/conventions.html#cite-pldi2017
+//! ### Prose Notation
+//! 
+//! > Phrase _A_ is valid with type _T_ if all constraints expressed by relative rules
+//! > are met. There is an assumption that a context exists.
+//! 
+//! ### Formal Notation
+//! 
+//! > phrase A : has respective type T, holds under the assumptions encoded in C.
+//! > If all premises hold, then the conclusion holds. If there is no premise, they
+//! > are _axioms_ whose conclusion holds unconditionally.
 
-use crate::structure::types::{FunctionIndex, FunctionType, MemoryType, RefType, ResultType, TableType, ValueType};
+use std::convert::TryFrom;
+
+use crate::structure::types::{FuncType, FunctionIndex, MemoryType, RefType, ResultType, TableType, ValueType};
 
 /// Representation of the validation context of a [Data] segment inside of a 
 /// Web Assembly [Module].
@@ -39,8 +50,8 @@ pub struct Ok {
 }
 
 pub struct Context {
-    ty: Vec<FunctionType>,
-    functions: Vec<FunctionType>,
+    ty: Vec<FuncType>,
+    functions: Vec<FuncType>,
     tables: Vec<TableType>,
     memories: Vec<MemoryType>,
     elements: Vec<RefType>,
@@ -49,4 +60,24 @@ pub struct Context {
     labels: Vec<ResultType>,
     returning: Option<ResultType>,
     references: Vec<FunctionIndex>,
+}
+
+impl Context {
+    pub fn get_type(&self, index: u32) -> Option<&FuncType> {
+        let index = usize::try_from(index).expect("TO be able to convert u32 to usize");
+        self.ty.get(index)
+    }
+}
+
+pub struct ValidationError {}
+
+impl ValidationError {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+pub trait Validation<Extra> {
+    /// Validate if the structure is valid.
+    fn validate(&self, ctx: &Context, args: Extra) -> Result<(), ValidationError>;
 }

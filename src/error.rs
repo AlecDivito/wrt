@@ -1,6 +1,6 @@
 use std::{error::Error, fmt::Display, num::ParseIntError};
 
-use crate::{block::BlockType, values::value::ValueType};
+use crate::{block::BlockType, structure::types::ValueType};
 
 #[derive(Debug)]
 pub struct WasmError {

@@ -7,7 +7,7 @@ use std::{
 use crate::{
     error::{Result, WasmError},
     module::{export::Export, import::Import, instruction::Instruction},
-    values::value::ValueType,
+    structure::types::ValueType,
 };
 
 pub struct SubString<'a> {

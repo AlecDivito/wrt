@@ -1,4 +1,4 @@
-use wrt::Engine;
+// use wrt::Engine;
 
 // #[test]
 // fn global_compile_test() {

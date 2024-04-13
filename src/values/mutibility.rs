@@ -6,8 +6,8 @@ use crate::block::Block;
 use crate::block::BlockType;
 use crate::error::Result;
 use crate::error::WasmError;
+use crate::structure::types::ValueType;
 
-use super::value::ValueType;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mutibility {
@@ -73,6 +73,8 @@ impl FromStr for Mutibility {
 #[cfg(test)]
 mod test {
 
+    use crate::structure::types::NumType;
+
     use super::*;
 
     fn parse_block(string: &str) -> Result<Mutibility> {
@@ -89,18 +91,18 @@ mod test {
     #[test]
     fn parse_mutibility_mut_i32() {
         let m = parse_block("(mut i32)").unwrap();
-        assert_eq!(m, Mutibility::Mut(ValueType::I32(0)));
+        assert_eq!(m, Mutibility::Mut(ValueType::Num(NumType::I32(0))));
     }
 
     #[test]
     fn parse_mutibility_const_i32() {
         let m = parse_content("i32 100").unwrap();
-        assert_eq!(m, Mutibility::Const(ValueType::I32(100)));
+        assert_eq!(m, Mutibility::Const(ValueType::Num(NumType::I32(0))));
     }
 
     #[test]
     fn parse_mutibility_const_i32_without_value() {
         let m = parse_content("i32").unwrap();
-        assert_eq!(m, Mutibility::Const(ValueType::I32(0)));
+        assert_eq!(m, Mutibility::Const(ValueType::Num(NumType::I32(0))));
     }
 }

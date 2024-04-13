@@ -2,10 +2,9 @@ use std::{convert::TryFrom, fmt::Display};
 
 use crate::{
     block::{Block, BlockType},
-    error::{Result, WasmError},
+    error::{Result, WasmError}, structure::types::ValueType,
 };
 
-use super::value::ValueType;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FuncParam {
@@ -183,6 +182,7 @@ mod test {
 
     use crate::block::SubString;
     use crate::error::Result;
+    use crate::structure::types::NumType;
 
     use super::*;
 
@@ -204,7 +204,7 @@ mod test {
         let block = parse("(func (param i32))").unwrap();
         let func = FunctionType::try_from(&block).unwrap();
         let param = func.parameters.get(0).unwrap();
-        assert_eq!(*param.value_type.get(0).unwrap(), ValueType::I32(0));
+        assert_eq!(*param.value_type.get(0).unwrap(), ValueType::Num(NumType::I32(0)));
         assert_eq!(param.value_type.len(), 1);
         assert!(func.results.is_empty());
     }
@@ -214,7 +214,7 @@ mod test {
         let block = parse("(func (param $id i32))").unwrap();
         let func = FunctionType::try_from(&block).unwrap();
         let param = func.parameters.get(0).unwrap();
-        assert_eq!(*param.value_type.get(0).unwrap(), ValueType::I32(0));
+        assert_eq!(*param.value_type.get(0).unwrap(), ValueType::Num(NumType::I32(0)));
         assert_eq!(param.value_type.len(), 1);
         assert_eq!(param.id.unwrap(), "$id");
         assert!(func.results.is_empty());
@@ -225,7 +225,7 @@ mod test {
         let block = parse("(func (param $id0 i32) (param $id1 i32) (param $id2 i32))").unwrap();
         let func = FunctionType::try_from(&block).unwrap();
         for (i, param) in func.parameters.iter().enumerate() {
-            assert_eq!(*param.value_type.get(0).unwrap(), ValueType::I32(0));
+            assert_eq!(*param.value_type.get(0).unwrap(), ValueType::Num(NumType::I32(0)));
             assert_eq!(param.value_type.len(), 1);
             assert_eq!(param.id.unwrap(), format!("$id{}", i));
         }
@@ -247,7 +247,7 @@ mod test {
         let block = parse("(func (result i32))").unwrap();
         let func = FunctionType::try_from(&block).unwrap();
         let result = func.results.get(0).unwrap();
-        assert_eq!(*result.value_type.get(0).unwrap(), ValueType::I32(0));
+        assert_eq!(*result.value_type.get(0).unwrap(),ValueType::Num(NumType::I32(0)));
         assert_eq!(result.value_type.len(), 1);
         assert!(func.parameters.is_empty());
     }
@@ -269,8 +269,8 @@ mod test {
         assert_eq!(func.results.len(), 1);
         let param = func.parameters.get(0).unwrap();
         let result = func.results.get(0).unwrap();
-        assert_eq!(*result.value_type.get(0).unwrap(), ValueType::I32(0));
-        assert_eq!(*param.value_type.get(0).unwrap(), ValueType::I32(0));
+        assert_eq!(*result.value_type.get(0).unwrap(), ValueType::Num(NumType::I32(0)));
+        assert_eq!(*param.value_type.get(0).unwrap(), ValueType::Num(NumType::I32(0)));
     }
 
     #[test]
@@ -280,8 +280,8 @@ mod test {
         assert_eq!(func.parameters.len(), 2);
         assert_eq!(func.results.len(), 2);
         for (param, result) in func.parameters.iter().zip(&func.results) {
-            assert_eq!(*result.value_type.get(0).unwrap(), ValueType::I32(0));
-            assert_eq!(*param.value_type.get(0).unwrap(), ValueType::I32(0));
+            assert_eq!(*result.value_type.get(0).unwrap(), ValueType::Num(NumType::I32(0)));
+            assert_eq!(*param.value_type.get(0).unwrap(), ValueType::Num(NumType::I32(0)));
         }
     }
 }

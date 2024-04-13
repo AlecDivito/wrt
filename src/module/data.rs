@@ -15,7 +15,7 @@ impl<'a> TryFrom<&Block<'a>> for Offset {
     type Error = WasmError;
 
     fn try_from(value: &Block<'a>) -> Result<Self, Self::Error> {
-        block.expect(BlockType::Offset)?;
+        value.expect(BlockType::Offset)?;
     }
 }
 
@@ -61,7 +61,7 @@ mod test {
 
     use super::*;
 
-    fn parse(program: &str) -> Result<Data> {
+    fn parse(program: &str) -> Result<Data, WasmError> {
         let mut source = SubString::new(program);
         let block = Block::parse(&mut source)?;
         Data::try_from(&block)

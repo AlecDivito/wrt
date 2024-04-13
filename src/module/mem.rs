@@ -57,7 +57,7 @@ impl<'a> TryFrom<&Block<'a>> for Memory {
 #[cfg(test)]
 mod test {
     use crate::error::Result;
-    use crate::{block::SubString, types::export::Export};
+    use crate::{block::SubString, module::export::Export};
 
     use super::*;
 

@@ -1,15 +1,12 @@
 use std::convert::TryFrom;
 
 use crate::{
-    block::Block,
-    error::{Result, WasmError},
-    values::limit::Limit,
+    block::Block, error::WasmError, values::limit::Limit
 };
 
 struct Table {
-    id: Option<String>,
     limit: Limit,
-    ref_type: 
+    id: Option<String>,
 }
 
 impl<'a> TryFrom<&Block<'a>> for Table {
@@ -23,11 +20,11 @@ impl<'a> TryFrom<&Block<'a>> for Table {
 #[cfg(test)]
 mod test {
 
-    use crate::block::Block;
+    use crate::{block::Block, error::WasmError};
 
     use super::*;
 
-    fn parse(string: &str) -> Result<Table> {
+    fn parse(string: &str) -> Result<Table, WasmError> {
         let mut source = crate::block::SubString::new(string);
         let block = Block::parse(&mut source)?;
         let func = Table::try_from(&block)?;

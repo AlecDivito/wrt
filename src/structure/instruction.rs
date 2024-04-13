@@ -676,9 +676,9 @@ pub enum ControlInstruction {
     // them with label indices. Label indexes are relative to nesting depth. Ex.
     // 0 refers to the innermost structured control instruction. Increasing indices
     // refer to farther out. 
-    Block, // block type instr* end
-    Loop, // block type instr* end
-    If, // block type instr* else instr* end
+    Block, // block ([TypeIndex] | [ValueType]?) [Instruction]* end
+    Loop,  // loop  ([TypeIndex] | [ValueType]?) [Instruction]* end
+    If,    // if    ([TypeIndex] | [ValueType]?) [Instruction]* else [Instruction]* end
 
     // perform unconditional branch
     Br, // label index

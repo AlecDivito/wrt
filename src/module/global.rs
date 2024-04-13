@@ -42,7 +42,7 @@ impl<'a> TryFrom<Block<'a>> for Global {
                 }
                 BlockType::Export => {
                     let export = Export::try_from(child)?;
-                    if let Some(e) = exports {
+                    if let Some(mut e) = exports {
                         e.push(export);
                     } else {
                         exports.insert(vec![export]);
@@ -104,11 +104,10 @@ mod test {
     use std::convert::TryInto;
 
     use crate::{
-        block::Block,
-        error::Result,
-        types::{export::Export, global::Global, import::Import},
-        values::{mutibility::Mutibility, value::ValueType},
+        block::Block, error::Result, module::{export::Export, import::Import}, structure::types::ValueType, values::mutibility::Mutibility
     };
+
+    use super::Global;
 
     fn parse(string: &str) -> Result<Global> {
         let mut source = crate::block::SubString::new(string);
