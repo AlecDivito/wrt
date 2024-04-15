@@ -49,10 +49,18 @@ use crate::structure::types::{
 
 /// Representation of the validation context of a [Data] segment inside of a
 /// Web Assembly [Module].
+#[derive(Clone)]
 pub struct Ok {}
 
+impl Ok {
+    pub fn is_ok(&self) -> bool {
+        true
+    }
+}
+
+#[derive(Clone)]
 pub struct Context {
-    ty: Vec<FunctionType>,
+    types: Vec<FunctionType>,
     functions: Vec<FunctionType>,
     tables: Vec<TableType>,
     memories: Vec<MemoryType>,
@@ -66,14 +74,14 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn get_type(&self, index: u32) -> Option<&FunctionType> {
-        let index = usize::try_from(index).expect("TO be able to convert u32 to usize");
-        self.ty.get(index)
+    pub fn get_type(&self, index: u32) -> Result<&FunctionType, ValidationError> {
+        let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
+        self.types.get(index).ok_or_else(ValidationError::new)
     }
 
-    pub fn get_function(&self, index: u32) -> Option<&FunctionType> {
-        let index = usize::try_from(index).expect("TO be able to convert u32 to usize");
-        self.functions.get(index)
+    pub fn get_function(&self, index: u32) -> Result<&FunctionType, ValidationError> {
+        let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
+        self.functions.get(index).ok_or_else(ValidationError::new)
     }
 
     pub fn get_element(&self, index: u32) -> Result<&RefType, ValidationError> {
@@ -166,6 +174,37 @@ impl Context {
     pub fn returning(&self) -> Option<&ResultType> {
         self.returning.as_ref()
     }
+
+    pub fn prepare_function_execution(&mut self, locals: Vec<ValueType>, ty: &FunctionType) {
+        self.locals = locals;
+        self.labels = vec![ty.output().clone()];
+        self.returning = Some(ty.output().clone());
+    }
+    
+    pub fn types(&self) -> &[FunctionType] {
+        &self.types
+    }
+    
+    pub fn functions(&self) -> &Vec<FunctionType> {
+        &self.functions
+    }
+    
+    pub fn locals(&self) -> &[ValueType] {
+        &self.locals
+    }
+    
+    pub fn labels(&self) -> &[ResultType] {
+        &self.labels
+    }
+    
+    pub fn datas(&self) -> &[Ok] {
+        &self.datas
+    }
+    
+    pub fn memories(&self) -> &[MemoryType] {
+        &self.memories
+    }
+
 }
 
 
@@ -245,4 +284,22 @@ impl ValidateInstruction for Expression {
 // get into parsing.
 pub struct ConstantExpression {
     instructions: Vec<Box<dyn ValidateInstruction>>,
+}
+
+impl ValidateInstruction for ConstantExpression {
+    fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
+        for index in 0..self.instructions.len() {
+            // TODO(Alec): I believe this bit of code validates all instructions.
+            // https://webassembly.github.io/spec/core/valid/instructions.html#non-empty-instruction-sequence-xref-syntax-instructions-syntax-instr-mathit-instr-ast-xref-syntax-instructions-syntax-instr-mathit-instr-n
+            // TODO(Alec): Validate that the expression thats ran is only constant expressions.
+            // because right now other parts of the program depend on these only being constant commands
+            let output = self.instructions[index].validate(ctx, inputs)?;
+            if index == self.instructions.len() - 1 {
+                return Ok(output)
+            } else {
+                inputs.0.extend(output);
+            }
+        }
+        Err(ValidationError::new())
+    }
 }

@@ -7,9 +7,6 @@
 
 use super::types::ValueType;
 
-// A list of instruction with a mark of "end" to mark the end of the expression.
-pub type Expression = Vec<Instruction>;
-
 /// [StackType]s are like [FunctionType]s. Except, thye allow individual operands
 /// to be classified as (bottom). It indicates that the type is unconstrained.
 ///

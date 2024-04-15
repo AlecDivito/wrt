@@ -1,4 +1,4 @@
-use crate::structure::{instruction::Instruction, types::{BlockType, DataIndex, ElementIndex, FloatVectorShape, FunctionIndex, FunctionReference, GlobalType, HalfType, IntegerVectorShape, LabelIndex, LocalIndex, MemoryArgument, MemoryIndex, MemoryLoadNumber, MemoryWidth, MemoryZeroWidth, NumType, RefType, SignType, TableIndex, TypeIndex, ValueType, VecType, VectorMemoryOp, VectorShape}};
+use crate::structure::types::{BlockType, DataIndex, ElementIndex, FloatVectorShape, FunctionIndex, FunctionReference, GlobalType, HalfType, IntegerVectorShape, LabelIndex, LocalIndex, MemoryArgument, MemoryIndex, MemoryLoadNumber, MemoryWidth, MemoryZeroWidth, NumType, RefType, SignType, TableIndex, TypeIndex, ValueType, VecType, VectorMemoryOp, VectorShape};
 
 use super::{Context, Input, InstructionSequence, ValidateInstruction, ValidateResult, ValidationError};
 
@@ -141,18 +141,18 @@ pub struct FunctionReferenceOperation {
 impl ValidateInstruction for FunctionReferenceOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        if let Some(_) = ctx.get_function(self.function_index) {
-            if ctx.contains_reference(self.function_index) {
-                // Reference: https://webassembly.github.io/spec/core/valid/instructions.html#xref-syntax-instructions-syntax-instr-ref-mathsf-ref-func-x
-                // TODO(Alec): We are supposed to be returning a function ref
-                // A function ref is basically a pointer to a function
-                // At runtime we validate if the function call is given the correct
-                // arguments. So i think just returning the index to the function
-                // should be ok because it's technically a pointer.
-                return Ok(vec![ValueType::RefType(RefType::FuncRef(self.function_index as FunctionReference))])
-            }
+        let _ = ctx.get_function(self.function_index)?;
+        if ctx.contains_reference(self.function_index) {
+            // Reference: https://webassembly.github.io/spec/core/valid/instructions.html#xref-syntax-instructions-syntax-instr-ref-mathsf-ref-func-x
+            // TODO(Alec): We are supposed to be returning a function ref
+            // A function ref is basically a pointer to a function
+            // At runtime we validate if the function call is given the correct
+            // arguments. So i think just returning the index to the function
+            // should be ok because it's technically a pointer.
+            return Ok(vec![ValueType::RefType(RefType::FuncRef(self.function_index as FunctionReference))])
+        } else {
+            Err(ValidationError::new())
         }
-        Err(ValidationError::new())
     }
 }
 
@@ -1254,7 +1254,7 @@ impl ValidateInstruction for CallOperation {
     // type Output = Vec<ValueType>;
 
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let func = ctx.get_function(self.function).ok_or_else(ValidationError::new)?;
+        let func = ctx.get_function(self.function)?;
         // validate function input arguments
         for ty in &func.input().0 {
             let _ = inputs.pop()?.try_into_value_type(ty)?;
@@ -1276,7 +1276,7 @@ impl ValidateInstruction for CallIndirectOperation {
         // validate reference type is func ref
         table.ref_type().try_into_func_ref()?;
         // type ty must be defined
-        let ty = ctx.get_type(self.ty).ok_or_else(ValidationError::new)?;
+        let ty = ctx.get_type(self.ty)?;
         // validate the function
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
         for input_ty in &ty.input().0 {

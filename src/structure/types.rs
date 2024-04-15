@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use crate::validation::{Context, Validation, ValidationError};
 
 /// Type of sign an integer is meant to taken as
@@ -25,8 +27,7 @@ impl BlockType {
         match self {
             BlockType::Index(index) => ctx
                 .get_type(*index)
-                .map(Clone::clone)
-                .ok_or_else(ValidationError::new),
+                .map(Clone::clone),
             BlockType::Value(Some(value)) => Ok(FunctionType::anonymous(value.clone())),
             BlockType::Value(None) => Ok(FunctionType::empty()),
         }        
@@ -34,12 +35,10 @@ impl BlockType {
 }
 
 impl Validation<FunctionType> for BlockType {
-    fn validate(&self, ctx: &Context, args: FunctionType) -> Result<(), ValidationError> {
+    fn validate(&self, ctx: &Context, _: FunctionType) -> Result<(), ValidationError> {
         match self {
             BlockType::Index(index) => ctx
                 .get_type(*index)
-                .and_then(|ty| if *ty == args { Some(ty) } else { None })
-                .ok_or_else(ValidationError::new)
                 .map(|_| ()),
             // This one is always ok, because the type is defined on the block type
             // already meaning that if we have parsed it, it's valid...
@@ -85,12 +84,25 @@ pub enum GlobalType {
     Const(ValueType),
     // Mutable global value
     Var(ValueType),
-
 }
 
 impl Validation<()> for GlobalType {
     fn validate(&self, _: &Context, _: ()) -> Result<(), ValidationError> {
         Ok(())
+    }
+}
+
+impl Validation<ValueType> for GlobalType {
+    fn validate(&self, _: &Context, args: ValueType) -> Result<(), ValidationError> {
+        let value = match self {
+            GlobalType::Const(value) => value,
+            GlobalType::Var(value) => value,
+        };
+        if *value == args {
+            Ok(())
+        } else {
+            Err(ValidationError::new())
+        }
     }
 }
 
@@ -110,6 +122,7 @@ impl Validation<GlobalType> for GlobalType {
 /// TODO(Alec): Validate...
 ///
 /// Like ["Memory"] tables have a size limit.
+#[derive(Clone)]
 pub struct TableType {
     limit: Limit,
     ref_type: RefType,
@@ -202,6 +215,7 @@ impl MemoryArgument {
 /// Classify linear ['Memories'] and their size range.
 ///
 /// Contains the min and max of memory size, given in units of Page Size.
+#[derive(Clone)]
 pub struct MemoryType {
     limit: Limit,
 }
@@ -221,6 +235,7 @@ impl Validation<MemoryType> for MemoryType {
 
 /// ["Limit"] size range of resizable storage. Associated with ["Memory"] and
 /// ["Table"] types. Max is optional.
+#[derive(Clone)]
 pub struct Limit {
     min: u32,
     max: Option<u32>,
@@ -314,6 +329,14 @@ impl Validation<FunctionType> for FunctionType {
 /// a function. Its a sequence of values
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResultType(pub Vec<ValueType>);
+
+impl Deref for ResultType {
+    type Target = Vec<ValueType>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 // FunctionReference is just a pointer to a function
 pub type FunctionReference = i32;
