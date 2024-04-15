@@ -44,7 +44,7 @@ pub mod instruction;
 use std::convert::TryFrom;
 
 use crate::structure::types::{
-    FuncType, FunctionIndex, MemoryType, RefType, ResultType, TableType, ValueType,
+    FunctionIndex, FunctionType, GlobalType, MemoryType, RefType, ResultType, TableType, ValueType
 };
 
 /// Representation of the validation context of a [Data] segment inside of a
@@ -52,11 +52,12 @@ use crate::structure::types::{
 pub struct Ok {}
 
 pub struct Context {
-    ty: Vec<FuncType>,
-    functions: Vec<FuncType>,
+    ty: Vec<FunctionType>,
+    functions: Vec<FunctionType>,
     tables: Vec<TableType>,
     memories: Vec<MemoryType>,
     elements: Vec<RefType>,
+    globals: Vec<GlobalType>,
     datas: Vec<Ok>,
     locals: Vec<ValueType>,
     labels: Vec<ResultType>,
@@ -65,14 +66,92 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn get_type(&self, index: u32) -> Option<&FuncType> {
+    pub fn get_type(&self, index: u32) -> Option<&FunctionType> {
         let index = usize::try_from(index).expect("TO be able to convert u32 to usize");
         self.ty.get(index)
     }
 
-    pub fn get_function(&self, index: u32) -> Option<&FuncType> {
+    pub fn get_function(&self, index: u32) -> Option<&FunctionType> {
         let index = usize::try_from(index).expect("TO be able to convert u32 to usize");
         self.functions.get(index)
+    }
+
+    pub fn get_element(&self, index: u32) -> Result<&RefType, ValidationError> {
+        let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
+        self.elements.get(index).ok_or_else(ValidationError::new)
+    }
+
+    pub fn get_data(&self, index: u32) -> Result<&Ok, ValidationError> {
+        let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
+        self.datas.get(index).ok_or_else(ValidationError::new)
+    }
+
+    pub fn get_memory(&self, index: Option<u32>) -> Result<&MemoryType, ValidationError> {
+        let i =  match index {
+            Some(x) => usize::try_from(x).map_err(|_| ValidationError::new())?,
+            None => 0,
+        };
+        self.memories.get(i).ok_or_else(ValidationError::new)
+    }
+
+    pub fn get_label(&self, index: u32) -> Result<&ResultType, ValidationError> {
+        // Note: We are supposed to push labels to the index 0 when we add them,
+        // but thats wasteful so here we go, pre-mature optimization! :) 
+        //
+        // We will push and pop labels instead basically meaning the list is in
+        // reverse. Meaning indexing will also be in reverse
+        let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
+        if self.labels.is_empty() || self.labels.len() <= index {
+            return Err(ValidationError::new())
+        } else {
+            let max_size = self.labels.len() - 1;
+            self.labels.get(max_size - index).ok_or_else(ValidationError::new)
+        }
+    }
+
+    pub fn prepend_label(&mut self, ty: ResultType) {
+        self.labels.push(ty)
+    }
+
+    pub fn remove_prepend_label(&mut self)-> Result<ResultType, ValidationError> {
+        self.labels.pop().ok_or_else(ValidationError::new)
+    }
+
+    pub fn get_local(&self, index: u32) -> Result<&ValueType, ValidationError> {
+        let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
+        self.locals.get(index).ok_or_else(ValidationError::new)
+    }
+
+    pub fn set_local(&mut self, index: u32, ty: ValueType) -> Result<(), ValidationError> {
+        let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
+        if self.locals.get(index).is_some() {
+            self.locals[index] = ty;
+            Ok(())
+        } else {
+            Err(ValidationError::new())
+        }
+    }
+
+    pub fn get_global(&self, index: u32) -> Result<&GlobalType, ValidationError> {
+        let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
+        self.globals.get(index).ok_or_else(ValidationError::new)
+    }
+
+    pub fn set_global(&mut self, index: u32, ty: ValueType) -> Result<(), ValidationError> {
+        let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
+        match self.globals.get(index) {
+            Some(GlobalType::Var(_)) => {
+                self.globals[index] = GlobalType::Var(ty);
+                Ok(())
+            }
+            Some(GlobalType::Const(_)) => Err(ValidationError::new()),
+            None => Err(ValidationError::new())
+        }
+    }
+
+    pub fn get_table(&self, index: u32) -> Result<&TableType, ValidationError> {
+        let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
+        self.tables.get(index).ok_or_else(ValidationError::new)
     }
 
     pub fn get_ref(&self, index: u32) -> Option<&FunctionIndex> {
@@ -83,6 +162,16 @@ impl Context {
     fn contains_reference(&self, arg: u32) -> bool {
         self.references.contains(&arg)
     }
+    
+    pub fn returning(&self) -> Option<&ResultType> {
+        self.returning.as_ref()
+    }
+}
+
+
+pub trait Validation<Extra> {
+    /// Validate if the structure is valid.
+    fn validate(&self, ctx: &Context, args: Extra) -> Result<(), ValidationError>;
 }
 
 pub struct ValidationError {}
@@ -93,7 +182,67 @@ impl ValidationError {
     }
 }
 
-pub trait Validation<Extra> {
-    /// Validate if the structure is valid.
-    fn validate(&self, ctx: &Context, args: Extra) -> Result<(), ValidationError>;
+pub type ValidateResult<T> = Result<T, ValidationError>;
+
+pub struct Input(pub Vec<ValueType>);
+
+impl Input {
+    pub fn pop(&mut self) -> ValidateResult<ValueType> {
+        self.0.pop().ok_or_else(ValidationError::new)
+    }
+}
+
+
+pub trait ValidateInstruction {
+    // type Output: IntoIterator<Item = ValueType>;
+    fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>>;
+}
+
+pub struct InstructionSequence {
+    instructions: Vec<Box<dyn ValidateInstruction>>,
+}
+
+impl ValidateInstruction for InstructionSequence {
+    fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
+        for index in 0..self.instructions.len() {
+            // TODO(Alec): I believe this bit of code validates all instructions.
+            // https://webassembly.github.io/spec/core/valid/instructions.html#non-empty-instruction-sequence-xref-syntax-instructions-syntax-instr-mathit-instr-ast-xref-syntax-instructions-syntax-instr-mathit-instr-n
+            let output = self.instructions[index].validate(ctx, inputs)?;
+            if index == self.instructions.len() - 1 {
+                return Ok(output)
+            } else {
+                inputs.0.extend(output);
+            }
+        }
+        Err(ValidationError::new())
+    }
+}
+
+/// Used for function bodies, global initialization values, elements and offsets of 
+/// element segments and offsets of data segments are given as expressions which
+/// are sequences of instructions terminated by an end marker.
+pub struct Expression {
+    instructions: Vec<Box<dyn ValidateInstruction>>,
+}
+
+impl ValidateInstruction for Expression {
+    fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
+        for index in 0..self.instructions.len() {
+            // TODO(Alec): I believe this bit of code validates all instructions.
+            // https://webassembly.github.io/spec/core/valid/instructions.html#non-empty-instruction-sequence-xref-syntax-instructions-syntax-instr-mathit-instr-ast-xref-syntax-instructions-syntax-instr-mathit-instr-n
+            let output = self.instructions[index].validate(ctx, inputs)?;
+            if index == self.instructions.len() - 1 {
+                return Ok(output)
+            } else {
+                inputs.0.extend(output);
+            }
+        }
+        Err(ValidationError::new())
+    }
+}
+
+// TODO(Alec): I'm not sure we need these expressions just yet. Maybe when we
+// get into parsing.
+pub struct ConstantExpression {
+    instructions: Vec<Box<dyn ValidateInstruction>>,
 }

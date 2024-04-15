@@ -10,13 +10,31 @@ pub enum SignType {
     Unsigned,
 }
 
+pub enum HalfType {
+    Low,
+    High
+}
+
 pub enum BlockType {
     Index(TypeIndex),
     Value(Option<ValueType>),
 }
 
-impl Validation<FuncType> for BlockType {
-    fn validate(&self, ctx: &Context, args: FuncType) -> Result<(), ValidationError> {
+impl BlockType {
+    pub fn get_function_type(&self, ctx: &Context) -> Result<FunctionType, ValidationError> {
+        match self {
+            BlockType::Index(index) => ctx
+                .get_type(*index)
+                .map(Clone::clone)
+                .ok_or_else(ValidationError::new),
+            BlockType::Value(Some(value)) => Ok(FunctionType::anonymous(value.clone())),
+            BlockType::Value(None) => Ok(FunctionType::empty()),
+        }        
+    }
+}
+
+impl Validation<FunctionType> for BlockType {
+    fn validate(&self, ctx: &Context, args: FunctionType) -> Result<(), ValidationError> {
         match self {
             BlockType::Index(index) => ctx
                 .get_type(*index)
@@ -25,6 +43,7 @@ impl Validation<FuncType> for BlockType {
                 .map(|_| ()),
             // This one is always ok, because the type is defined on the block type
             // already meaning that if we have parsed it, it's valid...
+            // short hand for function type [] -> [ValueType?]
             BlockType::Value(_) => Ok(()),
         }
     }
@@ -42,7 +61,7 @@ pub type LabelIndex = u32;
 
 /// Classify Imports and external values with their respective types
 pub enum ExternalType {
-    Func(FuncType),
+    Func(FunctionType),
     Table(TableType),
     Mem(MemoryType),
     Global(GlobalType),
@@ -66,6 +85,7 @@ pub enum GlobalType {
     Const(ValueType),
     // Mutable global value
     Var(ValueType),
+
 }
 
 impl Validation<()> for GlobalType {
@@ -95,6 +115,12 @@ pub struct TableType {
     ref_type: RefType,
 }
 
+impl TableType {
+    pub fn ref_type(&self) -> &RefType {
+        &self.ref_type
+    }
+}
+
 impl Validation<()> for TableType {
     fn validate(&self, ctx: &Context, _: ()) -> Result<(), ValidationError> {
         let max = 2_u32.pow(32) - 1;
@@ -111,6 +137,65 @@ impl Validation<TableType> for TableType {
         } else {
             Err(ValidationError::new())
         }
+    }
+}
+
+pub enum MemoryLoadNumber {
+    Load8,
+    Load16,
+    Load32,
+}
+
+impl MemoryLoadNumber {
+    pub fn bit_width(&self) -> u32 {
+        match self {
+            MemoryLoadNumber::Load8 => 8 ,
+            MemoryLoadNumber::Load16 => 16,
+            MemoryLoadNumber::Load32 => 32,
+        }
+    }
+}
+
+pub enum MemoryWidth {
+    I8,
+    I16,
+    I32,
+    I64
+}
+
+impl MemoryWidth {
+    pub fn bit_width(&self) -> u32 {
+        match self {
+            MemoryWidth::I8 => 8,
+            MemoryWidth::I16 => 16,
+            MemoryWidth::I32 => 32,
+            MemoryWidth::I64 => 64,
+        }
+    }
+}
+
+pub enum MemoryZeroWidth {
+    I32,
+    I64
+}
+
+impl MemoryZeroWidth {
+    pub fn bit_width(&self) -> u32 {
+        match self {
+            MemoryZeroWidth::I32 => 32,
+            MemoryZeroWidth::I64 => 64,
+        }
+    }
+}
+
+pub struct MemoryArgument {
+    offset: u32,
+    align: u32,
+}
+
+impl MemoryArgument {
+    pub fn align(&self) -> u32 {
+        self.align
     }
 }
 
@@ -178,27 +263,45 @@ impl Validation<Limit> for Limit {
     }
 }
 
-/// ["FuncType"] is a classification signature of a function. It maps a vector
+/// ["FunctionType"] is a classification signature of a function. It maps a vector
 /// of result types (as parameters) to return types (as the return value).
 ///
 /// They are also used to classify the input and outputs of ["Instructions"].
 ///
 /// Can be represented in rust as (Box<dyn Fn(ResultType) -> ResultType>)
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FuncType {
+pub struct FunctionType {
     input: ResultType,
     output: ResultType,
 }
 
-impl Validation<()> for FuncType {
+impl FunctionType {
+    pub fn empty() -> Self {
+        Self { input: ResultType(vec![]), output: ResultType(vec![]) }
+    }
+
+    pub fn anonymous(output: ValueType) -> Self {
+        Self { input: ResultType(vec![]), output: ResultType(vec![output])}
+    }
+    
+    pub fn output(&self) -> &ResultType {
+        &self.output
+    }
+    
+    pub fn input(&self) -> &ResultType {
+        &self.input
+    }
+}
+
+impl Validation<()> for FunctionType {
     fn validate(&self, _: &Context, _: ()) -> Result<(), ValidationError> {
         Ok(())
     }
 }
 
-impl Validation<FuncType> for FuncType {
-    fn validate(&self, _: &Context, f2: FuncType) -> Result<(), ValidationError> {
-        // Both funcTypes must be equal, otherwise error
+impl Validation<FunctionType> for FunctionType {
+    fn validate(&self, _: &Context, f2: FunctionType) -> Result<(), ValidationError> {
+        // Both FunctionTypes must be equal, otherwise error
         if *self == f2 {
             Ok(())
         } else {
@@ -210,16 +313,16 @@ impl Validation<FuncType> for FuncType {
 /// ["ResultType"] contains the return values from exiting instructions or calling
 /// a function. Its a sequence of values
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ResultType(Vec<ValueType>);
+pub struct ResultType(pub Vec<ValueType>);
 
-// FunctionType is just a pointer to a function
-pub type FunctionType = i32;
+// FunctionReference is just a pointer to a function
+pub type FunctionReference = i32;
 // ExternRef is just a pointer to a object
 pub type ExternRef = i32;
 
 /// ValueType are individual values that wasm can compute and a value that a
 /// variable can use.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValueType {
     Num(NumType),
     VecType(VecType),
@@ -250,20 +353,62 @@ impl ValueType {
     pub fn is_ref_type(&self) -> bool {
         matches!(self, Self::RefType(..))
     }
+
+    pub fn try_into_ref_type(self) -> Result<RefType, ValidationError> {
+        if let Self::RefType(v) = self {
+            Ok(v)
+        } else {
+            Err(ValidationError::new())
+        }
+    }
+
+    pub fn try_into_vec_type(self) -> Result<VecType, ValidationError> {
+        if let Self::VecType(v) = self {
+            Ok(v)
+        } else {
+            Err(ValidationError::new())
+        }
+    }
+
+    pub fn try_into_num(self) -> Result<NumType, ValidationError> {
+        if let Self::Num(v) = self {
+            Ok(v)
+        } else {
+            Err(ValidationError::new())
+        }
+    }
+
+    pub fn try_into_value_type(self, other: &Self) -> Result<Self, ValidationError> {
+        if self == *other {
+            Ok(self)
+        } else {
+            Err(ValidationError::new())
+        }
+    }
 }
 
 /// First class references to objects in the runtime ["Store"].
 ///
 /// Reference types are opaque, meaning that neither their size nor their bit
 /// pattern can be observed. Values of reference type can be stored in ["Tables"]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefType {
-    // FunctionType must exist, however, we don't know what it takes and we don't
+    // FunctionReference must exist, however, we don't know what it takes and we don't
     // know what it returns. The Function must exist in the program.
-    FuncRef(FunctionType),
+    FuncRef(FunctionReference),
     // A reference to a host resource. The resource should be owned by the ["Embedder"].
     // This is a type of pointer.
     ExternRef(ExternRef),
+}
+
+impl RefType {
+    pub fn try_into_func_ref(self) -> Result<FunctionReference, ValidationError> {
+        if let Self::FuncRef(v) = self {
+            Ok(v)
+        } else {
+            Err(ValidationError::new())
+        }
+    }
 }
 
 /// Vector types classify numeric values processed by SIMD instructions.
@@ -272,10 +417,45 @@ pub enum RefType {
 ///
 /// These are transparent (like ["NumType"]), meaning their bit patterns can
 /// be observed. Values of vector type can be stored in memory
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VecType([u8; 16]);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VecType;
 // TODO(Alec): Implement all the permutations of VecType. Because the value
 // is "transparent"
+
+
+pub enum VectorMemoryOp {
+    I8x8, I16x4, I32x2
+}
+
+impl VectorMemoryOp {
+    pub fn bit_width(&self) -> u32 {
+        match self {
+            VectorMemoryOp::I8x8 => 8 / 8 * 8,
+            VectorMemoryOp::I16x4 => 16 / 8 * 4,
+            VectorMemoryOp::I32x2 => 32 / 8 * 2,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VectorShape {
+    Int(IntegerVectorShape),
+    Float(FloatVectorShape)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntegerVectorShape {
+    I8x16,
+    I16x8,
+    I32x4,
+    I64x2,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatVectorShape {
+    F32x4,
+    F64x2
+}
 
 pub type Boolean = i32;
 pub type Pointer = i32;
@@ -288,6 +468,41 @@ pub enum NumType {
     I64,
     F32,
     F64,
+}
+
+impl NumType {
+    /// Returns `true` if the num type is [`I32`].
+    ///
+    /// [`I32`]: NumType::I32
+    #[must_use]
+    pub fn is_i32(&self) -> bool {
+        matches!(self, Self::I32)
+    }
+
+    pub fn try_into_i32(self) -> Result<NumType, ValidationError> {
+        if self.is_i32() {
+            Ok(self)
+        } else {
+            Err(ValidationError::new())
+        }
+    }
+
+    pub fn try_into_ty(self, ty: NumType) -> Result<NumType, ValidationError> {
+        if self == ty {
+            Ok(self)
+        } else {
+            Err(ValidationError::new())
+        }
+    }
+
+    pub fn bit_width(&self) -> u32 {
+        match self {
+            NumType::I32 => 32,
+            NumType::I64 => 64,
+            NumType::F32 => 32,
+            NumType::F64 => 64,
+        }
+    }
 }
 
 // impl ValueType {

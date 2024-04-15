@@ -5,9 +5,7 @@
 //! In addition, some instructions have static _immediate arguments_. Typically
 //! Indices or Type annotations.
 
-use crate::validation::ValidationError;
-
-use super::types::{NumType, ValueType};
+use super::types::ValueType;
 
 // A list of instruction with a mark of "end" to mark the end of the expression.
 pub type Expression = Vec<Instruction>;
