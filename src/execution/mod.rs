@@ -51,13 +51,13 @@ pub enum Number {
     F64(f64)
 }
 
-impl FromStr for Number {
-    type Err = ;
+// impl FromStr for Number {
+//     type Err = ;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        todo!()
-    }
-}
+//     fn from_str(s: &str) -> Result<Self, Self::Err> {
+//         todo!()
+//     }
+// }
 
 impl Into<Value> for Number {
     fn into(self) -> Value {

@@ -1,17 +1,22 @@
+use wrt::parse::parse;
+
 // use wrt::{module::value::ValueType, Engine};
 fn main() {
-    let p2 = r#"(module (global $global (export "global") (mut i32) 42))"#;
-    let p1 = r#"(module
-        (global $g (import "js" "global") (mut i32))
-        (func (export "getGlobal") (result i32)
-             (global.get $g))
-        (func (export "incGlobal")
-            global.set $g
-            global.get $g
-            i32.const 1
-            i32.add)
+    // https://github.com/WebAssembly/testsuite/blob/main/const.wast
+    let p1 = r#";; Test t.const instructions
+
+    ;; Syntax error
+
+    (; test ;)
+    
+    (module (func (i32.const 0_123_456_789) drop))
+    (module (func (i32.const 0x0_9acf_fBDF) drop))
+    (assert_malformed
+        (module quote "(func (i32.const) drop)")
+        "unexpected token"
     )"#;
-    println!("{}, {}", p1, p2)
+    let tokens = parse(p1);
+    println!("{:?}", tokens);
     // let engine = Engine::new();
     // let m1 = engine.compile(p1).unwrap();
     // let m2 = engine.compile(p2).unwrap();
