@@ -1,6 +1,6 @@
-use std::ops::Deref;
+use std::{fmt::Display, ops::Deref, str::FromStr};
 
-use crate::validation::{Context, Validation, ValidationError};
+use crate::{parse::ParseError, validation::{Context, Validation, ValidationError}};
 
 /// Type of sign an integer is meant to taken as
 ///
@@ -674,28 +674,28 @@ impl NumType {
 //     }
 // }
 
-// impl Display for ValueType {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         let content = match self {
-//             ValueType::I32(i) => format!("i32 {}", i),
-//             ValueType::I64(i) => format!("i64 {}", i),
-//             ValueType::F32(i) => format!("f32 {}", i),
-//             ValueType::F64(i) => format!("f64 {}", i),
-//         };
-//         write!(f, "{}", content)
-//     }
-// }
+impl Display for NumType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let content = match self {
+            NumType::I32 => format!("i32"),
+            NumType::I64 => format!("i64"),
+            NumType::F32 => format!("f32"),
+            NumType::F64 => format!("f64"),
+        };
+        write!(f, "{}", content)
+    }
+}
 
-// impl FromStr for ValueType {
-//     type Err = WasmError;
+impl FromStr for NumType {
+    type Err = ParseError;
 
-//     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-//         match s {
-//             "i32" => Ok(ValueType::I32(0)),
-//             "i64" => Ok(ValueType::I64(0)),
-//             "f32" => Ok(ValueType::F32(0.0)),
-//             "f64" => Ok(ValueType::F64(0.0)),
-//             _ => Err(WasmError::err(format!("did not expect type '{}'", s))),
-//         }
-//     }
-// }
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "i32" => Ok(NumType::I32),
+            "i64" => Ok(NumType::I64),
+            "f32" => Ok(NumType::F32),
+            "f64" => Ok(NumType::F64),
+            _ => Err(ParseError::new()),
+        }
+    }
+}

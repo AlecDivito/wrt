@@ -1,6 +1,10 @@
-use crate::structure::types::{BlockType, DataIndex, ElementIndex, FloatVectorShape, FunctionIndex, FunctionReference, GlobalType, HalfType, IntegerVectorShape, LabelIndex, LocalIndex, MemoryArgument, MemoryIndex, MemoryLoadNumber, MemoryWidth, MemoryZeroWidth, NumType, RefType, SignType, TableIndex, TypeIndex, ValueType, VecType, VectorMemoryOp, VectorShape};
+use crate::{execution::{Number, Stack, Trap}, structure::types::{BlockType, DataIndex, ElementIndex, FloatVectorShape, FunctionIndex, FunctionReference, GlobalType, HalfType, IntegerVectorShape, LabelIndex, LocalIndex, MemoryArgument, MemoryIndex, MemoryLoadNumber, MemoryWidth, MemoryZeroWidth, NumType, RefType, SignType, TableIndex, TypeIndex, ValueType, VecType, VectorMemoryOp, VectorShape}};
 
 use super::{Context, Input, InstructionSequence, ValidateInstruction, ValidateResult, ValidationError};
+
+pub trait Execute {
+    fn exec(&self, stack: &mut Stack) -> Result<(), Trap>;
+}
 
 /**
  * Number Instructions
@@ -24,25 +28,47 @@ const_instruction!(ConstF32, F32, f32); // Create ConstI32 type
 const_instruction!(ConstF64, F64, f64); // Create ConstI32 type
 
 // Validate Const operations
-pub struct Const(NumType);
+pub struct Const{
+    // TODO(Alec): This could just be .value instead.
+    ty: NumType,
+    value: Number,
+}
 impl ValidateInstruction for Const {
     // type Output = [ValueType; 1];
     fn validate(&self, _: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        Ok(vec![ValueType::Num(self.0.clone())])
+        Ok(vec![ValueType::Num(self.ty.clone())])
+    }
+}
+impl Execute for Const {
+    fn exec(&self, stack: &mut Stack) -> Result<(), Trap> {
+        if self.ty != self.value.ty() {
+            Err(Trap::new())
+        } else {
+            stack.push(self.value.clone());
+            Ok(())
+        }
     }
 }
 
-// Validate Unary Operations. Only avaliable for numbers.
-pub struct UnaryOperation;
+// Validate Unary Operations. Only available for numbers.
+pub struct UnaryOperation {
+    ty: NumType
+}
 impl ValidateInstruction for UnaryOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, _: &mut Context, input: &mut Input) -> ValidateResult<Vec<ValueType>> {
         let value = input.pop()?;
-        if value.is_num() {
+        if value.try_into_num()? == self.ty {
             Ok(vec![value])
         } else {
             Err(ValidationError::new())
         }
+    }
+}
+impl Execute for UnaryOperation {
+    fn exec(&self, stack: &mut Stack) -> Result<(), Trap> {
+        let number = stack.pop_and_assert_num(self.ty)?;
+        Ok(())
     }
 }
 

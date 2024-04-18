@@ -18,7 +18,11 @@
 // https://webassembly.github.io/spec/core/exec/conventions.html
 
 
-use crate::{structure::{module::Function, types::{FunctionIndex, FunctionType, GlobalType, MemoryType, RefType, TableType}}, validation::InstructionSequence};
+pub mod instrunctions;
+
+use std::str::FromStr;
+
+use crate::{structure::{module::Function, types::{FunctionType, GlobalType, MemoryType, NumType, RefType, TableType, ValueType}}, validation::InstructionSequence};
 
 /**
  * Addresses are dynamic, globally unique references to runtime objects. Indices
@@ -30,20 +34,53 @@ use crate::{structure::{module::Function, types::{FunctionIndex, FunctionType, G
  * Addresses should always be growing.
  */
 
- pub type FunctionAddress = usize;
- pub type TableAddress = usize;
- pub type MemoryAddress = usize;
- pub type GlobalAddress = usize;
- pub type ElementAddress = usize;
- pub type DataAddress = usize;
- pub type ExternAddress = usize;
+pub type FunctionAddress = usize;
+pub type TableAddress = usize;
+pub type MemoryAddress = usize;
+pub type GlobalAddress = usize;
+pub type ElementAddress = usize;
+pub type DataAddress = usize;
+pub type ExternAddress = usize;
 
 // i32, i64, f32, f64 default value is 0
+#[derive(Clone, Copy)]
 pub enum Number {
     I32(i32),
     I64(i64),
     F32(f32),
     F64(f64)
+}
+
+impl FromStr for Number {
+    type Err = ;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        todo!()
+    }
+}
+
+impl Into<Value> for Number {
+    fn into(self) -> Value {
+        Value::Num(self)
+    }
+}
+
+impl Number {
+    pub fn is_int(&self) -> bool {
+        match self {
+            Number::I32(_) | Number::I64(_) => true,
+            _ => false
+        }
+    }
+
+    pub fn ty(&self) -> NumType {
+        match self {
+            Number::I32(_) => NumType::I32,
+            Number::I64(_) => NumType::I64,
+            Number::F32(_) => NumType::F32,
+            Number::F64(_) => NumType::F64,
+        }
+    }
 }
 
 // RefType default value is null
@@ -60,7 +97,22 @@ pub enum Value {
     Ref(Reference)
 }
 
+impl Value {
+    pub fn try_into_num(self) -> Result<Number, Trap> {
+        if let Self::Num(v) = self {
+            Ok(v)
+        } else {
+            Err(Trap::new())
+        }
+    }
+}
+
 pub struct Trap {}
+impl Trap {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
 
 // Result is a sequence of values or a trap
 type WasmResult = Result<Vec<Value>, Trap>;
@@ -220,6 +272,31 @@ pub struct Stack {
     labels: Label,
     // Call frame of active function calls
     frame: Frame
+}
+
+impl Stack {
+    pub fn push(&mut self, value: impl Into<Value>) {
+        self.values.push(value.into());
+    }
+
+    pub fn pop_and_assert_int(&mut self) -> Result<Number, Trap> {
+        let number = self.values.pop().ok_or_else(Trap::new)?.try_into_num()?;
+        if number.is_int() {
+            Ok(number)
+        } else {
+            Err(Trap::new())
+        }
+    }
+
+    pub fn pop_and_assert_num(&mut self, ty: NumType) -> Result<Number, Trap> {
+        let value = self.values.pop().ok_or_else(Trap::new)?;
+        let number = value.try_into_num()?;
+        if number.ty() != ty {
+            Err(Trap::new())
+        } else {
+            Ok(number)
+        }
+    }
 }
 
 /// A computation over instructions that operates relative to the state of a current
