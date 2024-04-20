@@ -57,6 +57,7 @@ const TAB: char = 0x09 as char;
 const NEW_LINE: char = 0x0A as char;
 const NEW_LINE_2: char = 0x0D as char;
 const CLCR: char = /* 0x0D0A */ 0xDA as char;
+const ID_CHAR: [char; 23] = ['!','#','$','%','&','*','+','-','.','/',':','<','=','>','?','@','\\','^','_','`','|','~', 	0x2032 as char];
 
 impl<I> BufferedReader<I> where I: Iterator<Item = char> {
     pub fn new(source: I) -> Self {
@@ -151,7 +152,10 @@ impl<I> Tokenizer<I> where I: Iterator<Item = char> {
                     index: self.reader.index,
                     source: String::from(c),
                 }),
+                '$' => Some(self.read_id()),
+                '"' => Some(self.read_string()),
                 c if c.is_ascii_lowercase() => Some(self.read_keyword(c)),
+
                 _ => None
             };
             if let Some(token) = token {
@@ -159,6 +163,49 @@ impl<I> Tokenizer<I> where I: Iterator<Item = char> {
             }
         }
         tokens
+    }
+
+    fn read_string(&mut self) -> Token {
+        let line = self.reader.line;
+        let index = self.reader.index;
+        let column = self.reader.column;
+        let mut chars = vec![];
+        while let Some(c) = self.reader.next() {
+            match c {
+                SoftToken::Char(c) if c != '"' => chars.push(c),
+                _ => break
+            }
+        }
+        let source = chars.iter().collect::<String>();
+        Token {
+            line,
+            column,
+            index,
+            source,
+            ty: TokenType::Id,
+        }
+    }
+
+
+    fn read_id(&mut self) -> Token {
+        let line = self.reader.line;
+        let index = self.reader.index;
+        let column = self.reader.column;
+        let mut chars = vec![];
+        while let Some(c) = self.reader.next() {
+            match c {
+                SoftToken::Char(c) if c.is_ascii_alphanumeric() || ID_CHAR.contains(&c) => chars.push(c),
+                _ => break
+            }
+        }
+        let source = chars.iter().collect::<String>();
+        Token {
+            line,
+            column,
+            index,
+            source,
+            ty: TokenType::Id,
+        }
     }
 
     fn read_keyword(&mut self, char: char) -> Token {

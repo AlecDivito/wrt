@@ -10,11 +10,11 @@ fn main() {
     (; test ;)
     
     (module (func (i32.const 0_123_456_789) drop))
-    (module (func (i32.const 0x0_9acf_fBDF) drop))
+    (;(module (func (i32.const 0x0_9acf_fBDF) drop))
     (assert_malformed
         (module quote "(func (i32.const) drop)")
         "unexpected token"
-    )"#;
+    );)"#;
     let tokens = parse(p1);
     println!("{:?}", tokens);
     // let engine = Engine::new();
