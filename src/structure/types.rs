@@ -1,6 +1,9 @@
 use std::{fmt::Display, ops::Deref, str::FromStr};
 
-use crate::{parse::ParseError, validation::{Context, Validation, ValidationError}};
+use crate::{
+    parse::ParseError,
+    validation::{Context, Validation, ValidationError},
+};
 
 /// Type of sign an integer is meant to taken as
 ///
@@ -14,7 +17,7 @@ pub enum SignType {
 
 pub enum HalfType {
     Low,
-    High
+    High,
 }
 
 pub enum BlockType {
@@ -25,21 +28,17 @@ pub enum BlockType {
 impl BlockType {
     pub fn get_function_type(&self, ctx: &Context) -> Result<FunctionType, ValidationError> {
         match self {
-            BlockType::Index(index) => ctx
-                .get_type(*index)
-                .map(Clone::clone),
+            BlockType::Index(index) => ctx.get_type(*index).cloned(),
             BlockType::Value(Some(value)) => Ok(FunctionType::anonymous(value.clone())),
             BlockType::Value(None) => Ok(FunctionType::empty()),
-        }        
+        }
     }
 }
 
 impl Validation<FunctionType> for BlockType {
     fn validate(&self, ctx: &Context, _: FunctionType) -> Result<(), ValidationError> {
         match self {
-            BlockType::Index(index) => ctx
-                .get_type(*index)
-                .map(|_| ()),
+            BlockType::Index(index) => ctx.get_type(*index).map(|_| ()),
             // This one is always ok, because the type is defined on the block type
             // already meaning that if we have parsed it, it's valid...
             // short hand for function type [] -> [ValueType?]
@@ -162,7 +161,7 @@ pub enum MemoryLoadNumber {
 impl MemoryLoadNumber {
     pub fn bit_width(&self) -> u32 {
         match self {
-            MemoryLoadNumber::Load8 => 8 ,
+            MemoryLoadNumber::Load8 => 8,
             MemoryLoadNumber::Load16 => 16,
             MemoryLoadNumber::Load32 => 32,
         }
@@ -173,7 +172,7 @@ pub enum MemoryWidth {
     I8,
     I16,
     I32,
-    I64
+    I64,
 }
 
 impl MemoryWidth {
@@ -189,7 +188,7 @@ impl MemoryWidth {
 
 pub enum MemoryZeroWidth {
     I32,
-    I64
+    I64,
 }
 
 impl MemoryZeroWidth {
@@ -292,17 +291,23 @@ pub struct FunctionType {
 
 impl FunctionType {
     pub fn empty() -> Self {
-        Self { input: ResultType(vec![]), output: ResultType(vec![]) }
+        Self {
+            input: ResultType(vec![]),
+            output: ResultType(vec![]),
+        }
     }
 
     pub fn anonymous(output: ValueType) -> Self {
-        Self { input: ResultType(vec![]), output: ResultType(vec![output])}
+        Self {
+            input: ResultType(vec![]),
+            output: ResultType(vec![output]),
+        }
     }
-    
+
     pub fn output(&self) -> &ResultType {
         &self.output
     }
-    
+
     pub fn input(&self) -> &ResultType {
         &self.input
     }
@@ -445,17 +450,18 @@ pub struct VecType;
 // TODO(Alec): Implement all the permutations of VecType. Because the value
 // is "transparent"
 
-
 pub enum VectorMemoryOp {
-    I8x8, I16x4, I32x2
+    I8x8,
+    I16x4,
+    I32x2,
 }
 
 impl VectorMemoryOp {
     pub fn bit_width(&self) -> u32 {
         match self {
-            VectorMemoryOp::I8x8 => 8 / 8 * 8,
-            VectorMemoryOp::I16x4 => 16 / 8 * 4,
-            VectorMemoryOp::I32x2 => 32 / 8 * 2,
+            VectorMemoryOp::I8x8 => 8 / (8 * 8),
+            VectorMemoryOp::I16x4 => 16 / (8 * 4),
+            VectorMemoryOp::I32x2 => 32 / (8 * 2),
         }
     }
 }
@@ -463,7 +469,7 @@ impl VectorMemoryOp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VectorShape {
     Int(IntegerVectorShape),
-    Float(FloatVectorShape)
+    Float(FloatVectorShape),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -477,7 +483,7 @@ pub enum IntegerVectorShape {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FloatVectorShape {
     F32x4,
-    F64x2
+    F64x2,
 }
 
 pub type Boolean = i32;
@@ -677,10 +683,10 @@ impl NumType {
 impl Display for NumType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let content = match self {
-            NumType::I32 => format!("i32"),
-            NumType::I64 => format!("i64"),
-            NumType::F32 => format!("f32"),
-            NumType::F64 => format!("f64"),
+            NumType::I32 => "i32",
+            NumType::I64 => "i64",
+            NumType::F32 => "f32",
+            NumType::F64 => "f64",
         };
         write!(f, "{}", content)
     }

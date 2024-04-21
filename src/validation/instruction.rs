@@ -1,6 +1,16 @@
-use crate::{execution::{Number, Stack, Trap}, structure::types::{BlockType, DataIndex, ElementIndex, FloatVectorShape, FunctionIndex, FunctionReference, GlobalType, HalfType, IntegerVectorShape, LabelIndex, LocalIndex, MemoryArgument, MemoryIndex, MemoryLoadNumber, MemoryWidth, MemoryZeroWidth, NumType, RefType, SignType, TableIndex, TypeIndex, ValueType, VecType, VectorMemoryOp, VectorShape}};
+use crate::{
+    execution::{Number, Stack, Trap},
+    structure::types::{
+        BlockType, DataIndex, ElementIndex, FloatVectorShape, FunctionIndex, FunctionReference,
+        GlobalType, HalfType, IntegerVectorShape, LabelIndex, LocalIndex, MemoryArgument,
+        MemoryIndex, MemoryLoadNumber, MemoryWidth, MemoryZeroWidth, NumType, RefType, SignType,
+        TableIndex, TypeIndex, ValueType, VecType, VectorMemoryOp, VectorShape,
+    },
+};
 
-use super::{Context, Input, InstructionSequence, ValidateInstruction, ValidateResult, ValidationError};
+use super::{
+    Context, Input, InstructionSequence, ValidateInstruction, ValidateResult, ValidationError,
+};
 
 pub trait Execute {
     fn exec(&self, stack: &mut Stack) -> Result<(), Trap>;
@@ -16,7 +26,9 @@ macro_rules! const_instruction {
         impl ValidateInstruction for $name_ty {
             // type Output = [ValueType; 1];
             fn validate(&self, _: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
-                Ok(vec![ValueType::Num(crate::structure::types::NumType::$name)])
+                Ok(vec![ValueType::Num(
+                    crate::structure::types::NumType::$name,
+                )])
             }
         }
     };
@@ -28,7 +40,7 @@ const_instruction!(ConstF32, F32, f32); // Create ConstI32 type
 const_instruction!(ConstF64, F64, f64); // Create ConstI32 type
 
 // Validate Const operations
-pub struct Const{
+pub struct Const {
     // TODO(Alec): This could just be .value instead.
     ty: NumType,
     value: Number,
@@ -52,7 +64,7 @@ impl Execute for Const {
 
 // Validate Unary Operations. Only available for numbers.
 pub struct UnaryOperation {
-    ty: NumType
+    ty: NumType,
 }
 impl ValidateInstruction for UnaryOperation {
     // type Output = [ValueType; 1];
@@ -162,7 +174,7 @@ impl ValidateInstruction for IsNullReferenceOperation {
 }
 
 pub struct FunctionReferenceOperation {
-    function_index: FunctionIndex
+    function_index: FunctionIndex,
 }
 impl ValidateInstruction for FunctionReferenceOperation {
     // type Output = [ValueType; 1];
@@ -175,7 +187,9 @@ impl ValidateInstruction for FunctionReferenceOperation {
             // At runtime we validate if the function call is given the correct
             // arguments. So i think just returning the index to the function
             // should be ok because it's technically a pointer.
-            return Ok(vec![ValueType::RefType(RefType::FuncRef(self.function_index as FunctionReference))])
+            return Ok(vec![ValueType::RefType(RefType::FuncRef(
+                self.function_index as FunctionReference,
+            ))]);
         } else {
             Err(ValidationError::new())
         }
@@ -274,9 +288,9 @@ impl LaneIndex {
 
 // https://webassembly.github.io/spec/core/valid/instructions.html#mathsf-i8x16-xref-syntax-instructions-syntax-instr-vec-mathsf-shuffle-xref-syntax-instructions-syntax-laneidx-mathit-laneidx-16
 // i8x16
-pub struct VectorShuffleOperation{
+pub struct VectorShuffleOperation {
     // Index lane can't be larger then the number 32
-    lane_index: LaneIndex
+    lane_index: LaneIndex,
 }
 impl ValidateInstruction for VectorShuffleOperation {
     // type Output = [ValueType; 1];
@@ -295,8 +309,8 @@ impl ValidateInstruction for VectorShuffleOperation {
 // shape.splat
 // shape => i8x16, i16x8, 132x4, i64x2, f32x4, f64x2
 // TODO(Alec): Come back to this
-pub struct VectorSplatOperation{
-    shape: VectorShape
+pub struct VectorSplatOperation {
+    shape: VectorShape,
 }
 impl ValidateInstruction for VectorSplatOperation {
     // type Output = [ValueType; 1];
@@ -349,9 +363,10 @@ pub struct VectorReplaceLaneOperation {
 impl ValidateInstruction for VectorReplaceLaneOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, _: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let shape = inputs.pop()?.try_into_num()?; // Get the value type from the first operand
-        inputs.pop()?.try_into_vec_type()?;                 // Get the vector
-        if self.lane_index.validate_against_shape(self.shape) || shape != shape {
+        let _shape = inputs.pop()?.try_into_num()?; // Get the value type from the first operand
+        inputs.pop()?.try_into_vec_type()?; // Get the vector
+        if self.lane_index.validate_against_shape(self.shape) {
+            // } && shape != self.shape {
             Err(ValidationError::new())
         } else {
             Ok(vec![ValueType::VecType(VecType)])
@@ -361,7 +376,7 @@ impl ValidateInstruction for VectorReplaceLaneOperation {
 
 // https://webassembly.github.io/spec/core/valid/instructions.html#xref-syntax-instructions-syntax-shape-mathit-shape-mathsf-xref-syntax-instructions-syntax-vunop-mathit-vunop
 pub struct VectorShapeUnaryOperation {
-    _shape: VectorShape
+    _shape: VectorShape,
 }
 impl ValidateInstruction for VectorShapeUnaryOperation {
     // type Output = [ValueType; 1];
@@ -373,7 +388,7 @@ impl ValidateInstruction for VectorShapeUnaryOperation {
 }
 
 pub struct VectorShapeBinaryOperation {
-    _shape: VectorShape
+    _shape: VectorShape,
 }
 impl ValidateInstruction for VectorShapeBinaryOperation {
     // type Output = [ValueType; 1];
@@ -388,7 +403,7 @@ impl ValidateInstruction for VectorShapeBinaryOperation {
 
 // shape.vrelop
 pub struct VectorShapeRelationOperation {
-    _shape: VectorShape
+    _shape: VectorShape,
 }
 impl ValidateInstruction for VectorShapeRelationOperation {
     // type Output = [ValueType; 1];
@@ -403,14 +418,14 @@ impl ValidateInstruction for VectorShapeRelationOperation {
 
 // ishape.vishiftop
 pub struct VectorShapeShiftOperation {
-    _shape: IntegerVectorShape
+    _shape: IntegerVectorShape,
 }
 impl ValidateInstruction for VectorShapeShiftOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, _: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         // TODO(Alec): DO i need to parse the actual value to validate that it
         // matches with the shape we have?
-        
+
         // Pop the first argument as a I32
         inputs.pop()?.try_into_num()?.try_into_i32()?;
         inputs.pop()?.try_into_vec_type()?;
@@ -421,7 +436,7 @@ impl ValidateInstruction for VectorShapeShiftOperation {
 // shape.vtestop
 // https://webassembly.github.io/spec/core/valid/instructions.html#xref-syntax-instructions-syntax-shape-mathit-shape-mathsf-xref-syntax-instructions-syntax-vtestop-mathit-vtestop
 pub struct VectorShapeTestOperation {
-    _shape: VectorShape
+    _shape: VectorShape,
 }
 impl ValidateInstruction for VectorShapeTestOperation {
     // type Output = [ValueType; 1];
@@ -437,7 +452,7 @@ impl ValidateInstruction for VectorShapeTestOperation {
 pub struct VectorShapeTopHalfZeroOperation {
     _shape: VectorShape,
     _sign: SignType,
-    _half: HalfType
+    _half: HalfType,
 }
 impl ValidateInstruction for VectorShapeTopHalfZeroOperation {
     // type Output = [ValueType; 1];
@@ -451,7 +466,7 @@ impl ValidateInstruction for VectorShapeTopHalfZeroOperation {
 pub struct VectorShapeNarrowOperation {
     _op_shape: IntegerVectorShape,
     _desired_shape: IntegerVectorShape,
-    _desired_sign: SignType
+    _desired_sign: SignType,
 }
 impl ValidateInstruction for VectorShapeNarrowOperation {
     // type Output = [ValueType; 1];
@@ -464,7 +479,7 @@ impl ValidateInstruction for VectorShapeNarrowOperation {
 
 // (ishape).bitmask
 pub struct VectorShapeBitMaskOperation {
-    _shape: IntegerVectorShape
+    _shape: IntegerVectorShape,
 }
 impl ValidateInstruction for VectorShapeBitMaskOperation {
     // type Output = [ValueType; 1];
@@ -473,7 +488,6 @@ impl ValidateInstruction for VectorShapeBitMaskOperation {
         Ok(vec![ValueType::Num(NumType::I32)])
     }
 }
-
 
 // (ishape).dot_(ishape)_s
 pub struct VectorShapeDotProductOperation {
@@ -494,7 +508,7 @@ pub struct VectorShapeExtendMultiplyOperation {
     _op_shape: IntegerVectorShape,
     _desired_shape: IntegerVectorShape,
     _desired_half: HalfType,
-    _desired_sign: SignType
+    _desired_sign: SignType,
 }
 impl ValidateInstruction for VectorShapeExtendMultiplyOperation {
     // type Output = [ValueType; 1];
@@ -509,7 +523,7 @@ impl ValidateInstruction for VectorShapeExtendMultiplyOperation {
 pub struct VectorShapeExtendAddPairWiseOperation {
     _op_shape: IntegerVectorShape,
     _desired_shape: IntegerVectorShape,
-    _desired_sign: SignType
+    _desired_sign: SignType,
 }
 impl ValidateInstruction for VectorShapeExtendAddPairWiseOperation {
     // type Output = [ValueType; 1];
@@ -537,8 +551,8 @@ impl ValidateInstruction for DropOperation {
     }
 }
 
-pub struct SelectOperation{
-    t: Option<NumType>
+pub struct SelectOperation {
+    t: Option<NumType>,
 }
 impl ValidateInstruction for SelectOperation {
     // type Output = [ValueType; 1];
@@ -555,14 +569,14 @@ impl ValidateInstruction for SelectOperation {
                 } else {
                     Err(ValidationError::new())
                 }
-            },
+            }
             None => {
                 if ty1 == ty2 && (ty1.is_num() || ty1.is_vec_type()) {
                     Ok(vec![ty1])
                 } else {
                     Err(ValidationError::new())
                 }
-            },
+            }
         }
     }
 }
@@ -572,7 +586,7 @@ impl ValidateInstruction for SelectOperation {
  */
 
 pub struct LocalGetOperation {
-    index: LocalIndex
+    index: LocalIndex,
 }
 impl ValidateInstruction for LocalGetOperation {
     // type Output = [ValueType; 1];
@@ -582,32 +596,31 @@ impl ValidateInstruction for LocalGetOperation {
 }
 
 pub struct LocalSetOperation {
-    index: LocalIndex
+    index: LocalIndex,
 }
 impl ValidateInstruction for LocalSetOperation {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         let ty = inputs.pop()?;
-        ctx.set_local(self.index, ty)?; 
+        ctx.set_local(self.index, ty)?;
         Ok(vec![])
     }
 }
 
 pub struct LocalTeeOperation {
-    index: LocalIndex
+    index: LocalIndex,
 }
 impl ValidateInstruction for LocalTeeOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         let ty = inputs.pop()?;
-        ctx.set_local(self.index, ty.clone())?; 
+        ctx.set_local(self.index, ty.clone())?;
         Ok(vec![ty])
     }
 }
 
-
 pub struct GlobalGetOperation {
-    index: LocalIndex
+    index: LocalIndex,
 }
 impl ValidateInstruction for GlobalGetOperation {
     // type Output = [ValueType; 1];
@@ -623,13 +636,13 @@ impl ValidateInstruction for GlobalGetOperation {
 }
 
 pub struct GlobalSetOperation {
-    index: LocalIndex
+    index: LocalIndex,
 }
 impl ValidateInstruction for GlobalSetOperation {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         let ty = inputs.pop()?;
-        ctx.set_global(self.index, ty)?; 
+        ctx.set_global(self.index, ty)?;
         Ok(vec![])
     }
 }
@@ -638,7 +651,7 @@ impl ValidateInstruction for GlobalSetOperation {
  * Table Instructions
  */
 pub struct TableGetOperation {
-    index: TableIndex
+    index: TableIndex,
 }
 impl ValidateInstruction for TableGetOperation {
     // type Output = [ValueType; 1];
@@ -650,7 +663,7 @@ impl ValidateInstruction for TableGetOperation {
 }
 
 pub struct TableSetOperation {
-    index: TableIndex
+    index: TableIndex,
 }
 impl ValidateInstruction for TableSetOperation {
     // type Output = [ValueType; 0];
@@ -667,7 +680,7 @@ impl ValidateInstruction for TableSetOperation {
 }
 
 pub struct TableSizeOperation {
-    index: TableIndex
+    index: TableIndex,
 }
 impl ValidateInstruction for TableSizeOperation {
     // type Output = [ValueType; 1];
@@ -678,7 +691,7 @@ impl ValidateInstruction for TableSizeOperation {
 }
 
 pub struct TableGrowOperation {
-    index: TableIndex
+    index: TableIndex,
 }
 impl ValidateInstruction for TableGrowOperation {
     // type Output = [ValueType; 1];
@@ -697,7 +710,7 @@ impl ValidateInstruction for TableGrowOperation {
 }
 
 pub struct TableFillOperation {
-    index: TableIndex
+    index: TableIndex,
 }
 impl ValidateInstruction for TableFillOperation {
     // type Output = [ValueType; 0];
@@ -718,7 +731,7 @@ impl ValidateInstruction for TableFillOperation {
 
 pub struct TableCopyOperation {
     table_x_index: TableIndex,
-    table_y_index: TableIndex
+    table_y_index: TableIndex,
 }
 impl ValidateInstruction for TableCopyOperation {
     // type Output = [ValueType; 0];
@@ -738,7 +751,7 @@ impl ValidateInstruction for TableCopyOperation {
 
 pub struct TableInitOperation {
     table: TableIndex,
-    element: ElementIndex
+    element: ElementIndex,
 }
 impl ValidateInstruction for TableInitOperation {
     // type Output = [ValueType; 0];
@@ -757,7 +770,7 @@ impl ValidateInstruction for TableInitOperation {
 }
 
 pub struct ElementDropOperation {
-    element: ElementIndex
+    element: ElementIndex,
 }
 impl ValidateInstruction for ElementDropOperation {
     // type Output = [ValueType; 0];
@@ -843,7 +856,6 @@ impl ValidateInstruction for StoreMemoryOperation {
     }
 }
 
-
 // (t).store(N) memarg
 // N => 8, 16, 32
 pub struct StoreNMemoryOperation {
@@ -878,7 +890,7 @@ pub struct VectorLoadMemoryOperation {
     memory: Option<MemoryIndex>,
     op: VectorMemoryOp,
     _sign: SignType,
-    args: MemoryArgument
+    args: MemoryArgument,
 }
 impl ValidateInstruction for VectorLoadMemoryOperation {
     // type Output = [ValueType; 1];
@@ -902,7 +914,7 @@ pub struct VectorLoadNSplatMemoryOperation {
     // in the spec.
     memory: Option<MemoryIndex>,
     width_n: MemoryWidth,
-    args: MemoryArgument
+    args: MemoryArgument,
 }
 impl ValidateInstruction for VectorLoadNSplatMemoryOperation {
     // type Output = [ValueType; 1];
@@ -927,7 +939,7 @@ pub struct VectorLoadNZeroMemoryOperation {
     // in the spec.
     memory: Option<MemoryIndex>,
     width_n: MemoryZeroWidth,
-    args: MemoryArgument
+    args: MemoryArgument,
 }
 impl ValidateInstruction for VectorLoadNZeroMemoryOperation {
     // type Output = [ValueType; 1];
@@ -953,13 +965,13 @@ pub struct VectorLoadNLaneMemoryOperation {
     memory: Option<MemoryIndex>,
     width_n: MemoryWidth,
     index: LaneIndex,
-    args: MemoryArgument
+    args: MemoryArgument,
 }
 impl ValidateInstruction for VectorLoadNLaneMemoryOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         if !self.index.validate_against_memory_width(&self.width_n) {
-            return Err(ValidationError::new())
+            return Err(ValidationError::new());
         }
 
         let _memory = ctx.get_memory(self.memory)?;
@@ -984,13 +996,13 @@ pub struct VectorStoreNLaneMemoryOperation {
     memory: Option<MemoryIndex>,
     width_n: MemoryWidth,
     index: LaneIndex,
-    args: MemoryArgument
+    args: MemoryArgument,
 }
 impl ValidateInstruction for VectorStoreNLaneMemoryOperation {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         if !self.index.validate_against_memory_width(&self.width_n) {
-            return Err(ValidationError::new())
+            return Err(ValidationError::new());
         }
 
         let _memory = ctx.get_memory(self.memory)?;
@@ -1103,7 +1115,7 @@ impl ValidateInstruction for UnreachableOperation {
 // block _blocktype_ _instr_* end
 pub struct BlockOperation {
     ty: BlockType,
-    instructions: InstructionSequence
+    instructions: InstructionSequence,
 }
 impl ValidateInstruction for BlockOperation {
     // type Output = Vec<ValueType>;
@@ -1123,7 +1135,7 @@ impl ValidateInstruction for BlockOperation {
             for input_ty in &ty.input().0 {
                 let _ = inputs.pop()?.try_into_value_type(input_ty)?;
             }
-            return Ok(ty.output().clone().0)
+            return Ok(ty.output().clone().0);
         }
         Err(ValidationError::new())
     }
@@ -1132,7 +1144,7 @@ impl ValidateInstruction for BlockOperation {
 // loop _blocktype_ _instr_* end
 pub struct LoopOperation {
     ty: BlockType,
-    instructions: InstructionSequence
+    instructions: InstructionSequence,
 }
 impl ValidateInstruction for LoopOperation {
     // type Output = Vec<ValueType>;
@@ -1151,7 +1163,7 @@ impl ValidateInstruction for LoopOperation {
             for input_ty in &ty.input().0 {
                 let _ = inputs.pop()?.try_into_value_type(input_ty)?;
             }
-            return Ok(ty.output().clone().0)
+            return Ok(ty.output().clone().0);
         }
         Err(ValidationError::new())
     }
@@ -1183,14 +1195,14 @@ impl ValidateInstruction for IfOperation {
             for input_ty in &ty.input().0 {
                 let _ = inputs.pop()?.try_into_value_type(input_ty)?;
             }
-            return Ok(ty.output().clone().0)
+            return Ok(ty.output().clone().0);
         }
         Err(ValidationError::new())
     }
 }
 
 pub struct BrOperation {
-    label: LabelIndex
+    label: LabelIndex,
 }
 impl ValidateInstruction for BrOperation {
     // type Output = Vec<ValueType>;
@@ -1205,7 +1217,7 @@ impl ValidateInstruction for BrOperation {
 }
 
 pub struct BrIfOperation {
-    label: LabelIndex
+    label: LabelIndex,
 }
 impl ValidateInstruction for BrIfOperation {
     // type Output = Vec<ValueType>;
@@ -1223,7 +1235,7 @@ impl ValidateInstruction for BrIfOperation {
 /// https://webassembly.github.io/spec/core/valid/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-br-table-l-ast-l-n
 pub struct BrTableOperation {
     labels: Vec<LabelIndex>,
-    label_n: LabelIndex
+    label_n: LabelIndex,
 }
 impl ValidateInstruction for BrTableOperation {
     // type Output = Vec<ValueType>;
@@ -1237,20 +1249,25 @@ impl ValidateInstruction for BrTableOperation {
         for label in self.labels.iter() {
             let ty = ctx.get_label(*label)?;
             if ty.0.len() != ty_n.0.len() {
-                return Err(ValidationError::new())
+                return Err(ValidationError::new());
             }
             for index in ty.0.len()..0 {
-                let value = inputs.0.get(index - inputs.0.len()).ok_or_else(ValidationError::new)?;
+                let value = inputs
+                    .0
+                    .get(index - inputs.0.len())
+                    .ok_or_else(ValidationError::new)?;
                 value.try_into_value_type(ty.0.get(index).ok_or_else(ValidationError::new)?)?;
             }
         }
         // There must be enough input as expected in `ty_n`
         if ty_n.0.len() > inputs.0.len() {
-            return Err(ValidationError::new())
+            return Err(ValidationError::new());
         }
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
         for index in ty_n.0.len()..0 {
-            let _ = inputs.pop()?.try_into_value_type(ty_n.0.get(index).unwrap())?;
+            let _ = inputs
+                .pop()?
+                .try_into_value_type(ty_n.0.get(index).unwrap())?;
         }
 
         Ok(ty_n.0.clone())
@@ -1274,7 +1291,7 @@ impl ValidateInstruction for ReturnOperation {
 }
 
 pub struct CallOperation {
-    function: FunctionIndex
+    function: FunctionIndex,
 }
 impl ValidateInstruction for CallOperation {
     // type Output = Vec<ValueType>;
