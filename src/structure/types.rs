@@ -10,11 +10,13 @@ use crate::{
 /// Some integer instructions come in two flavors, where a signedness distinguishes
 /// whether the operands are to be interpreted as signed or unsigned. Use two compliment
 /// for signed interpretation means that they behave the same regardless of signedness
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SignType {
     Signed,
     Unsigned,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HalfType {
     Low,
     High,
@@ -168,6 +170,7 @@ impl MemoryLoadNumber {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryWidth {
     I8,
     I16,
@@ -186,6 +189,7 @@ impl MemoryWidth {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryZeroWidth {
     I32,
     I64,
@@ -499,6 +503,24 @@ pub enum NumType {
     F64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntType {
+    I32,
+    I64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloatType {
+    F32,
+    F64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Left,
+    Rigth,
+}
+
 impl NumType {
     /// Returns `true` if the num type is [`I32`].
     ///
@@ -689,19 +711,5 @@ impl Display for NumType {
             NumType::F64 => "f64",
         };
         write!(f, "{}", content)
-    }
-}
-
-impl FromStr for NumType {
-    type Err = ParseError;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "i32" => Ok(NumType::I32),
-            "i64" => Ok(NumType::I64),
-            "f32" => Ok(NumType::F32),
-            "f64" => Ok(NumType::F64),
-            _ => Err(ParseError::new()),
-        }
     }
 }

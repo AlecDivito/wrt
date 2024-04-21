@@ -1,21 +1,18 @@
+use std::{env::args, fs};
+
 use wrt::parse::parse;
 
-// use wrt::{module::value::ValueType, Engine};
 fn main() {
-    // https://github.com/WebAssembly/testsuite/blob/main/const.wast
-    let p1 = r#";; Test t.const instructions
+    let mut args = args();
+    let file_path = args
+        .nth(1)
+        .unwrap_or("./testsuite/comments.wast".to_string());
 
-    ;; Syntax error
+    println!("Reading file {}", file_path);
 
-    (; test ;)
-    
-    (module (func (i32.const 0_123_456_789) drop))
-    (;(module (func (i32.const 0x0_9acf_fBDF) drop))
-    (assert_malformed
-        (module quote "(func (i32.const) drop)")
-        "unexpected token"
-    );)"#;
-    let tokens = parse(p1);
+    let file = fs::read_to_string(file_path).unwrap();
+
+    let tokens = parse(&file);
     println!("{:?}", tokens);
     // let engine = Engine::new();
     // let m1 = engine.compile(p1).unwrap();
