@@ -5,16 +5,37 @@ use crate::structure::types::{
     MemoryZeroWidth, NumType, SignType, VectorShape,
 };
 
-// enum SpecError
+#[derive(Debug)]
+pub struct Location {
+    index: usize,
+    line: usize,
+    column: usize,
+}
 
 #[derive(Debug)]
 pub struct ParseError {
     // spec_error
+    location: Option<Location>,
     error: String,
+    tokens: Option<Vec<Token>>,
 }
 impl ParseError {
     pub fn new(str: impl Into<String>) -> Self {
-        Self { error: str.into() }
+        Self {
+            error: str.into(),
+            location: None,
+            tokens: None,
+        }
+    }
+
+    pub fn with_location(mut self, location: Location) -> Self {
+        self.location = Some(location);
+        self
+    }
+
+    pub fn with_tokens(mut self, token: Vec<Token>) -> Self {
+        self.tokens = Some(token);
+        self
     }
 }
 
@@ -158,7 +179,7 @@ pub enum Keyword {
 
     NegativeFloat(FloatType),
     AbsoluteFloat(FloatType),
-    SqareRootFloat(FloatType),
+    SquareRootFloat(FloatType),
     CeilFloat(FloatType),
     FloorFLoat(FloatType),
     TruncateFloat(FloatType),
@@ -494,14 +515,14 @@ impl FromStr for Keyword {
 
             "f32.neg" => NegativeFloat(FloatType::F32),
             "f32.abs" => AbsoluteFloat(FloatType::F32),
-            "f32.sqrt" => SqareRootFloat(FloatType::F32),
+            "f32.sqrt" => SquareRootFloat(FloatType::F32),
             "f32.ceil" => CeilFloat(FloatType::F32),
             "f32.floor" => FloorFLoat(FloatType::F32),
             "f32.trunc" => TruncateFloat(FloatType::F32),
             "f32.nearest" => NearestFloat(FloatType::F32),
             "f64.neg" => NegativeFloat(FloatType::F64),
             "f64.abs" => AbsoluteFloat(FloatType::F64),
-            "f64.sqrt" => SqareRootFloat(FloatType::F64),
+            "f64.sqrt" => SquareRootFloat(FloatType::F64),
             "f64.ceil" => CeilFloat(FloatType::F64),
             "f64.floor" => FloorFLoat(FloatType::F64),
             "f64.trunc" => TruncateFloat(FloatType::F64),
@@ -923,7 +944,12 @@ pub struct BufferedReader<I: Iterator<Item = char>> {
 pub fn parse(wasm: &str) -> Result<Vec<Token>, ParseError> {
     let reader = BufferedReader::new(wasm.chars());
     let mut tokenizer = Tokenizer::new(reader);
-    tokenizer.parse()
+    match tokenizer.parse() {
+        Ok(_) => Ok(tokenizer.tokens),
+        Err(err) => Err(err
+            .with_location(tokenizer.reader.location())
+            .with_tokens(tokenizer.tokens)),
+    }
 }
 
 #[derive(Debug)]
@@ -931,6 +957,16 @@ pub enum SoftToken {
     Char(char),
     Whitespace,
     NewLine,
+}
+
+impl SoftToken {
+    pub fn as_char(&self) -> Option<&char> {
+        if let Self::Char(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
 }
 
 const SPACE: char = ' ' as char;
@@ -1046,6 +1082,24 @@ where
         self.source.peek()
     }
 
+    pub fn read(&mut self) -> Option<char> {
+        if let Some(char) = self.source.next() {
+            self.index += 1;
+            // If new line: https://doc.rust-lang.org/stable/std/io/trait.BufRead.html#method.read_line
+            if char == NEW_LINE || char == NEW_LINE_2 || char == CLCR {
+                self.line += 1;
+                self.column = 0;
+            } else if char == SPACE || char == TAB {
+                self.column += 1;
+            } else {
+                self.column += 1;
+            }
+            Some(char)
+        } else {
+            None
+        }
+    }
+
     pub fn pop(&mut self) -> Option<SoftToken> {
         if let Some(char) = self.source.next() {
             self.index += 1;
@@ -1078,6 +1132,14 @@ where
     pub fn eof(&mut self) -> bool {
         self.source.peek().is_none()
     }
+
+    fn location(&self) -> Location {
+        Location {
+            index: self.index,
+            line: self.line,
+            column: self.column,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -1091,6 +1153,7 @@ pub struct Token {
 
 pub struct Tokenizer<I: Iterator<Item = char>> {
     reader: BufferedReader<I>,
+    tokens: Vec<Token>,
 }
 
 impl<I> Tokenizer<I>
@@ -1098,11 +1161,13 @@ where
     I: Iterator<Item = char>,
 {
     pub fn new(reader: BufferedReader<I>) -> Self {
-        Self { reader }
+        Self {
+            reader,
+            tokens: vec![],
+        }
     }
 
-    pub fn parse(&mut self) -> Result<Vec<Token>, ParseError> {
-        let mut tokens = vec![];
+    pub fn parse(&mut self) -> Result<(), ParseError> {
         while let Some(character) = self.reader.pop() {
             let c = match character {
                 SoftToken::Char(char) => char,
@@ -1138,10 +1203,10 @@ where
                 _ => None,
             };
             if let Some(token) = token {
-                tokens.push(token);
+                self.tokens.push(token);
             }
         }
-        Ok(tokens)
+        Ok(())
     }
 
     fn read_hex_number(&mut self, is_hex: bool) -> Result<NumberString, ParseError> {
@@ -1149,10 +1214,14 @@ where
         while let Some(character) = self.reader.peek() {
             // First character must be a hex digit
             if !HEX_DIGIT.contains(character) {
-                return Err(ParseError::new(format!(
-                    "character {} is not valid",
-                    character
-                )));
+                if chars.is_empty() {
+                    return Err(ParseError::new(format!(
+                        "character {} is not valid. List of chars {:?}",
+                        character, chars
+                    )));
+                } else {
+                    break
+                }
             }
             match self.reader.pop() {
                 Some(SoftToken::Char('_')) => continue,
@@ -1186,44 +1255,45 @@ where
         // Strings represent both textual and binary data. They are enclosed in
         // quotations ("), and can contain anything expect control characters or
         // backslashed (unless used for escape character)
-        while let Some(c) = self.reader.pop() {
-            match c {
-                SoftToken::Char(c) if c == '"' => break,
-                SoftToken::Char(c) if c.is_ascii_control() => {
-                    return Err(ParseError::new(
-                        "Failed to read string because it contains a control character",
-                    ))
-                }
-                SoftToken::Char(c) if c == '\\' => {
-                    match self.reader.pop() {
-                        Some(SoftToken::Char('n')) => chars.push('\x0a'),
-                        Some(SoftToken::Char('r')) => chars.push('\x0d'),
-                        Some(SoftToken::Char('\\')) => chars.push('\\'),
-                        Some(SoftToken::Char('\'')) => chars.push('\''),
-                        Some(SoftToken::Char('\"')) => chars.push('\"'),
-                        Some(SoftToken::Char('u')) => {
-                            let number = self.read_hex_number(false)?;
-                            panic!("hi, please give me the code that errored here, thanks.")
-                        }
-                        Some(SoftToken::Char(c)) => {
-                            let number = if c == '0'
-                                && self.reader.peek().map(|c| *c == 'x').unwrap_or(false)
-                            {
+        while let Some(c) = self.reader.read() {
+            if c == '"' {
+                break;
+            } else if c.is_ascii_control() {
+                return Err(ParseError::new(
+                    "Failed to read string because it contains a control character",
+                ));
+            } else if c == '\\' {
+                match self.reader.read() {
+                    Some('n') => chars.push('\x0a'),
+                    Some('r') => chars.push('\x0d'),
+                    Some('\\') => chars.push('\\'),
+                    Some('\'') => chars.push('\''),
+                    Some('\"') => chars.push('\"'),
+                    Some('u') => {
+                        let number = self.read_hex_number(false)?;
+                        panic!("hi, please give me the code that errored here, thanks.")
+                    }
+                    Some(char) if char.is_digit(10) => {
+                        let number =
+                            if char == '0' && self.reader.peek().map(|c| *c == 'x').unwrap_or(false) {
                                 self.read_hex_number(true)?
                             } else {
                                 self.read_hex_number(false)?
                             };
-                            panic!("Hi, please tell me where i failed :) ")
-                        }
-                        char => {
-                            let string = chars.iter().collect::<String>();
-                            format!("Was reading string {} and encountered invalid escape character \\{:?}", string, char);
-                            return Err(ParseError::new(string));
-                        }
+                        panic!("Hi, please tell me where i failed :) ")
                     }
+                    Some(char) => {
+                        let string = chars.iter().collect::<String>();
+                        format!(
+                            "Was reading string {} and encountered invalid escape character \\{:?}",
+                            string, char
+                        );
+                        return Err(ParseError::new(string));
+                    }
+                    _ => panic!(),
                 }
-                SoftToken::Char(c) => chars.push(c),
-                _ => break,
+            } else {
+                chars.push(c)
             }
         }
         let source = chars.iter().collect::<String>();
@@ -1232,7 +1302,7 @@ where
             column,
             index,
             source,
-            ty: TokenType::Id,
+            ty: TokenType::String,
         })
     }
 
@@ -1264,12 +1334,11 @@ where
         let index = self.reader.index;
         let column = self.reader.column;
         let mut chars = vec![char];
-        while let Some(c) = self.reader.pop() {
-            match c {
-                SoftToken::Char(c) if c.is_ascii_alphanumeric() || ID_CHAR.contains(&c) => {
-                    chars.push(c)
-                }
-                _ => break,
+        while let Some(peek) = self.reader.peek() {
+            if peek.is_ascii_alphanumeric() || ID_CHAR.contains(&peek) {
+                chars.push(*self.reader.pop().unwrap().as_char().unwrap())
+            } else {
+                break;
             }
         }
         let source = chars.iter().collect::<String>();
@@ -1293,11 +1362,20 @@ where
     }
 
     fn read_until_closing_comment(&mut self) {
+        let mut counter = 0;
         while let Some(c) = self.reader.pop() {
             match c {
+                SoftToken::Char('(') if self.reader.is_next(';') => {
+                    counter += 1;
+                    self.reader.pop();
+                }
                 SoftToken::Char(';') if self.reader.is_next(')') => {
                     let _ = self.reader.pop(); // Todo(Alec): .expect(')')
-                    break;
+                    if counter == 0 {
+                        break;
+                    } else {
+                        counter -= 1;
+                    }
                 }
                 _ => continue,
             }

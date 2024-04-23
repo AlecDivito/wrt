@@ -11,8 +11,9 @@ fn main() {
     println!("Reading file {}", file_path);
 
     let file = fs::read_to_string(file_path).unwrap();
+    let substring = &file[797..];
 
-    let tokens = parse(&file);
+    let tokens = parse(&substring);
     println!("{:?}", tokens);
     // let engine = Engine::new();
     // let m1 = engine.compile(p1).unwrap();
