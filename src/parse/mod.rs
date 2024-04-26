@@ -1220,7 +1220,7 @@ where
                         character, chars
                     )));
                 } else {
-                    break
+                    break;
                 }
             }
             match self.reader.pop() {
@@ -1273,14 +1273,12 @@ where
                         let number = self.read_hex_number(false)?;
                         panic!("hi, please give me the code that errored here, thanks.")
                     }
-                    Some(char) if char.is_digit(10) => {
-                        let number =
-                            if char == '0' && self.reader.peek().map(|c| *c == 'x').unwrap_or(false) {
-                                self.read_hex_number(true)?
-                            } else {
-                                self.read_hex_number(false)?
-                            };
-                        panic!("Hi, please tell me where i failed :) ")
+                    Some(num1) if num1.is_ascii_hexdigit() => {
+                        use std::convert::TryFrom;
+                        let num1 = num1.to_digit(16).unwrap();
+                        let num2 = self.reader.read().unwrap().to_digit(16).unwrap();
+                        let number = u8::try_from(16 * num1 + num1).unwrap();
+                        chars.push(number as char);
                     }
                     Some(char) => {
                         let string = chars.iter().collect::<String>();
