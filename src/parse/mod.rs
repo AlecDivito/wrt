@@ -1,9 +1,9 @@
 use std::{iter::Peekable, str::FromStr};
 
-use crate::structure::types::{
+use crate::{execution::{Number, Value}, structure::types::{
     Direction, FloatType, FloatVectorShape, HalfType, IntType, IntegerVectorShape, MemoryWidth,
     MemoryZeroWidth, NumType, SignType, VectorShape,
-};
+}};
 
 #[derive(Debug)]
 pub struct Location {
@@ -15,8 +15,8 @@ pub struct Location {
 #[derive(Debug)]
 pub struct ParseError {
     // spec_error
-    location: Option<Location>,
-    error: String,
+    pub location: Option<Location>,
+    pub error: String,
     tokens: Option<Vec<Token>>,
 }
 impl ParseError {
@@ -129,6 +129,9 @@ pub enum Keyword {
     I64Store8,
     I64Store16,
     I64Store32,
+
+    MemArgsAlign(u32),
+    MemArgsOffset(u32),
 
     // text block types
     Type,
@@ -918,6 +921,24 @@ impl FromStr for Keyword {
             "nan:arithmetic" => NaNArithmetic,
             "input" => Input,
             "output" => Output,
+            str if str.starts_with("align=") =>  {
+                let amount = match str.split('=').nth(1).unwrap().parse::<u32>() {
+                    Ok(amount) => amount,
+                    Err(err) => {
+                        return Err(ParseError::new(format!("Parsing `align` of memory args was determine to be not be a number. Failed to parse {} with error {:?}", str, err)))
+                    },
+                };
+                MemArgsAlign(amount)
+            }
+            str if str.starts_with("offset=") =>  {
+                let amount = match str.split('=').nth(1).unwrap().parse::<u32>() {
+                    Ok(amount) => amount,
+                    Err(err) => {
+                        return Err(ParseError::new(format!("Parsing `offset` of memory args was determine to be not be a number. Failed to parse {} with error {:?}", str, err)))
+                    },
+                };
+                MemArgsOffset(amount)
+            }
             str => return Err(ParseError::new(format!("{} is not a keyword", str))),
         })
     }
@@ -1198,6 +1219,38 @@ where
                 }),
                 '$' => Some(self.read_id()),
                 '"' => Some(self.read_string()?),
+                c if c.is_ascii_digit() || c == '+' || c == '-' => {
+                    let line = self.reader.line;
+                    let column = self.reader.column;
+                    let index = self.reader.index;
+                    let (ty, source) = match (c, self.reader.peek()) {
+                        ('0', Some('x')) => {
+                            self.reader.pop().unwrap();
+                            (TokenType::UnsignedHex, self.read_hex_digit(None, true))
+                        },
+                        ('-', Some(_)) | ('+', Some(_)) => {
+                            if *self.reader.peek().unwrap() == '0' {
+                                self.reader.pop().unwrap();
+                            }
+                            match self.reader.peek() {
+                                Some('x') => {
+                                    self.reader.pop().unwrap();
+                                    (TokenType::SignedHex, self.read_hex_digit(Some(c), true))
+                                }
+                                _ => (TokenType::SignedNumber, self.read_hex_digit(Some(c), false))
+                            } 
+                        }
+                        (c, _) => 
+                            (TokenType::UnsignedNumber, self.read_hex_digit(Some(c), false)) 
+                    };
+                    Some(Token {
+                        ty,
+                        line,
+                        column,
+                        index,
+                        source: source?,
+                    })
+                }
                 c if c.is_ascii_lowercase() => Some(self.read_keyword(c)?),
 
                 _ => None,
@@ -1207,6 +1260,41 @@ where
             }
         }
         Ok(())
+    }
+
+    fn read_hex_digit(&mut self, starting_char: Option<char>, is_hex: bool) -> Result<String, ParseError> {
+        let mut chars = if let Some(c) = starting_char {
+            vec![c]
+        } else {
+            vec![]
+        };
+        while let Some(character) = self.reader.peek() {
+            // First character must be a hex digit
+            if !HEX_DIGIT.contains(character) {
+                if chars.is_empty() {
+                    return Err(ParseError::new(format!(
+                        "character {} is not valid. List of chars {:?}",
+                        character, chars
+                    )));
+                } else {
+                    break;
+                }
+            }
+            match self.reader.pop() {
+                Some(SoftToken::Char('_')) => continue,
+                Some(SoftToken::Char(c)) if HEX_DIGIT.contains(&c) && is_hex => chars.push(c),
+                Some(SoftToken::Char(c)) if DIGIT.contains(&c) && !is_hex => chars.push(c),
+                char => {
+                    let str = chars.iter().collect::<String>();
+                    let err = format!(
+                        "Parsing Hex Number {} failed when encountered {:?}",
+                        str, char
+                    );
+                    return Err(ParseError::new(err));
+                }
+            }
+        }
+        Ok(chars.iter().collect::<String>())
     }
 
     fn read_hex_number(&mut self, is_hex: bool) -> Result<NumberString, ParseError> {

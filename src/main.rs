@@ -13,6 +13,9 @@ use wrt::parse::parse;
 pub struct Cli {
     #[command(subcommand)]
     command: Commands,
+
+    #[arg(name = "debug", short = 'd', default_value = "false")]
+    debug: bool,
 }
 
 #[derive(Subcommand)]
@@ -36,58 +39,105 @@ pub enum TestCommands {
     File { name: String },
 }
 
-fn get_all_tests(path: &PathBuf) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
-    if !path.is_dir() {
-        println!("{:?} is a file and not a directory", path);
-        return Ok(vec![]);
-    }
-    let mut list = vec![];
-    for entry in fs::read_dir(path)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_file() {
-            if let Some(ext) = path.extension() {
-                if ext.as_bytes() == b"wast" {
-                    list.push(path);
+pub struct Options {
+    directory: PathBuf,
+    debug: bool,
+}
+
+impl Options {
+
+    fn get_all_tests(&self) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
+        if !self.directory.is_dir() {
+            println!("{:?} is a file and not a directory", self.directory);
+            return Ok(vec![]);
+        }
+        let mut list = vec![];
+        for entry in fs::read_dir(&self.directory)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension() {
+                    if ext.as_bytes() == b"wast" {
+                        list.push(path);
+                    }
                 }
             }
         }
+        Ok(list)
     }
-    Ok(list)
-}
-
-fn list_tests(path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    let mut lists = get_all_tests(&path)?;
-    lists.sort();
-    for item in lists {
-        println!("{}", item.file_name().unwrap().to_string_lossy());
+    
+    pub fn list_tests(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut lists = self.get_all_tests()?;
+        lists.sort();
+        for item in lists {
+            println!("{}", item.file_name().unwrap().to_string_lossy());
+        }
+        Ok(())
     }
-    Ok(())
-}
-
-pub fn test_all(directory: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    let lists = get_all_tests(&directory)?;
-    for item in lists {
-        let contents = std::fs::read_to_string(&item)?;
+    
+    pub fn test_all(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let lists = self.get_all_tests()?;
+        let mut pass = 0;
+        let mut fail = 0;
+        for item in &lists {
+            let contents = std::fs::read_to_string(&item)?;
+            match parse(&contents) {
+                Ok(_) => {
+                    pass += 1;
+                    println!("PASS {}", item.file_name().unwrap().to_string_lossy())
+                }
+                Err(err) => {
+                    fail += 1;
+                    if self.debug {
+                        println!("FAIL {} - {} at {:?}", item.file_name().unwrap().to_string_lossy(), err.error, err.location)
+                    } else {
+                        println!("FAIL {}", item.file_name().unwrap().to_string_lossy())
+                    }
+                },
+            };
+        }
+        println!("Passed {}/{}", pass, lists.len());
+        println!("Failed {}/{}",  fail, lists.len());
+        Ok(())
+    }
+    
+    pub fn test_single(&self, file: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+        if !file.is_file() {
+            return Ok(())
+        }
+        let contents = fs::read_to_string(file)?;
         match parse(&contents) {
-            Ok(_) => {
-                println!("PASS {}", item.file_name().unwrap().to_string_lossy())
-            }
-            Err(_) => println!("FAIL {}", item.file_name().unwrap().to_string_lossy()),
-        };
+            Ok(tokens) => {
+                println!("{:?}", tokens);
+            },
+            Err(err) => {
+                if self.debug {
+                    println!("Parse Error: {:?}", err)
+                } else {
+                    println!("Parse Error: {:?} at location {:?}", err.error, err.location)
+                }
+            },
+        }
+        Ok(())
     }
-    Ok(())
 }
+
 
 fn main() {
     let cli = Cli::parse();
 
     if let Err(err) = match cli.command {
-        Commands::Test(test) => match test.tests {
-            TestCommands::List => list_tests(test.directory),
-            TestCommands::All => test_all(test.directory),
-            TestCommands::File { name } => todo!("todo"),
-        },
+        Commands::Test(test) => {
+            let opts = Options {
+                directory: test.directory.clone(),
+                debug: cli.debug,
+            };
+            match test.tests {
+                TestCommands::List => opts.list_tests(),
+                TestCommands::All => opts.test_all(),
+                TestCommands::File { name } => opts.test_single(test.directory.join(name)),
+            }
+        }
     } {
         println!("{:?}", err);
         println!("Program failed to complete successfully")

@@ -43,7 +43,7 @@ pub type DataAddress = usize;
 pub type ExternAddress = usize;
 
 // i32, i64, f32, f64 default value is 0
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum Number {
     I32(i32),
     I64(i64),
