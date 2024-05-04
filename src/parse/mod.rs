@@ -1,11 +1,10 @@
+pub mod ast;
+
 use std::{iter::Peekable, str::FromStr};
 
-use crate::{
-    execution::{Number, Value},
-    structure::types::{
-        Direction, FloatType, FloatVectorShape, HalfType, IntType, IntegerVectorShape, MemoryWidth,
-        MemoryZeroWidth, NumType, SignType, VectorShape,
-    },
+use crate::structure::types::{
+    Direction, FloatType, FloatVectorShape, HalfType, IntType, IntegerVectorShape, MemoryWidth,
+    MemoryZeroWidth, NumType, SignType, VectorShape,
 };
 
 #[derive(Debug)]
@@ -42,14 +41,11 @@ impl ParseError {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TokenType {
     LeftParen,
     RightParen,
-    UnsignedNumber,
-    UnsignedHex,
-    SignedNumber,
-    SignedHex,
+    Number,
     String,
     Id,
     Reserved,
@@ -57,7 +53,7 @@ pub enum TokenType {
 }
 
 #[rustfmt::skip]
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Keyword {
     // Number
     I32,
@@ -977,7 +973,7 @@ pub struct BufferedReader<I: Iterator<Item = char>> {
     column: usize,
 }
 
-pub fn parse(wasm: &str) -> Result<Vec<Token>, ParseError> {
+pub fn tokenize(wasm: &str) -> Result<Vec<Token>, ParseError> {
     let reader = BufferedReader::new(wasm.chars());
     let mut tokenizer = Tokenizer::new(reader);
     match tokenizer.parse() {
@@ -1005,7 +1001,7 @@ impl SoftToken {
     }
 }
 
-const SPACE: char = ' ' as char;
+const SPACE: char = ' ';
 const TAB: char = 0x09 as char;
 const NEW_LINE: char = 0x0A as char;
 const NEW_LINE_2: char = 0x0D as char;
@@ -1193,13 +1189,19 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Token {
     line: usize,
     column: usize,
     index: usize,
     source: String,
     ty: TokenType,
+}
+
+impl Token {
+    pub fn ty(&self) -> &TokenType {
+        &self.ty
+    }
 }
 
 pub struct Tokenizer<I: Iterator<Item = char>> {
@@ -1254,31 +1256,9 @@ where
                     let column = self.reader.column;
                     let index = self.reader.index;
 
-                    let ty = TokenType::UnsignedHex;
+                    let ty = TokenType::Number;
                     let source = self.read_until_delimiter(c);
 
-                    // let (ty, source) = match (c, self.reader.peek()) {
-                    //     ('0', Some('x')) => {
-                    //         self.reader.pop().unwrap();
-                    //         (TokenType::UnsignedHex, self.read_hex_digit(None, true))
-                    //     }
-                    //     ('-', Some(_)) | ('+', Some(_)) => {
-                    //         if *self.reader.peek().unwrap() == '0' {
-                    //             self.reader.pop().unwrap();
-                    //         }
-                    //         match self.reader.peek() {
-                    //             Some('x') => {
-                    //                 self.reader.pop().unwrap();
-                    //                 (TokenType::SignedHex, self.read_hex_digit(Some(c), true))
-                    //             }
-                    //             _ => (TokenType::SignedNumber, self.read_hex_digit(Some(c), false)),
-                    //         }
-                    //     }
-                    //     (c, _) => (
-                    //         TokenType::UnsignedNumber,
-                    //         self.read_hex_digit(Some(c), false),
-                    //     ),
-                    // };
                     Some(Token {
                         ty,
                         line,

@@ -1,17 +1,28 @@
-use std::{collections::HashSet, ops::Deref};
+use crate::parse::{
+    ast::{Error, Expect, IntoResult, TryGet},
+    Keyword,
+};
+use std::{collections::HashSet, iter::Peekable, ops::Deref};
 
-use crate::validation::{
-    ConstantExpression, Context, Expression, Input, ValidateInstruction, ValidateResult,
-    Validation, ValidationError,
+use crate::{
+    parse::{ast::Parse, Token},
+    validation::{
+        ConstantExpression, Context, Expression, Input, ValidateInstruction, ValidateResult,
+        Validation, ValidationError,
+    },
 };
 
 use super::types::{
-    FunctionIndex, FunctionType, GlobalIndex, GlobalType, MemoryIndex, MemoryType, RefType,
+    FunctionIndex, FunctionType, GlobalIndex, GlobalType, Limit, MemoryIndex, MemoryType, RefType,
     TableIndex, TableType, TypeIndex, ValueType,
 };
 
 /// The definition of a function
 pub struct Function {
+    // TODO(Alec): This is temporary work around for not having an identifier list
+    // instead we will just keep our id's on the object
+    id: Option<String>,
+
     // An index to the signature of the function. Can be found in the module.
     // Accessible through local indices.
     ty_index: TypeIndex,
@@ -62,7 +73,19 @@ impl ValidateInstruction for Table {
 
 /// Describe memory as their memory type. It's a vector of raw uninterpreted bytes.
 pub struct Memory {
+    // TODO(Alec): This is a temporary measure. Keep the Id on the block. This
+    // will need to be refactored later.
+    id: Option<String>,
     ty: MemoryType,
+}
+
+impl Memory {
+    pub fn new(id: Option<String>, limit: Limit) -> Self {
+        Self {
+            id,
+            ty: MemoryType::new(limit),
+        }
+    }
 }
 
 impl ValidateInstruction for Memory {
@@ -300,6 +323,7 @@ impl ValidateInstruction for Import {
     }
 }
 
+#[derive(Default)]
 pub struct Module {
     // Types definitions inside of the web assembly
     types: Vec<FunctionType>,
@@ -337,6 +361,82 @@ pub struct Module {
     start: Option<StartFunction>,
 }
 
+impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for Module {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, Error> {
+        let mut this = Module::default();
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::Module)?;
+
+        loop {
+            tokens.next().expect_left_paren()?;
+            let token = tokens.next();
+            match token.expect_keyword()? {
+                Keyword::Type => {
+                    let id = tokens.peek().copied().try_id();
+                    if id.is_some() {
+                        let _ = tokens.next();
+                    }
+                }
+                Keyword::Func => {
+                    let id = tokens.peek().copied().try_id();
+                    if id.is_some() {
+                        let _ = tokens.next();
+                    }
+
+                    // let next = tokens.next();
+
+                    // match tokens.next().expect_keyword()? {
+                    //     Keyword::Export => {}
+                    //     Keyword::
+                    // }
+                }
+                Keyword::Table => {
+                    let id = tokens.peek().copied().try_id();
+                    if id.is_some() {
+                        let _ = tokens.next();
+                    }
+                }
+                Keyword::Memory => {
+                    let id = tokens.peek().copied().try_id();
+                    if id.is_some() {
+                        let _ = tokens.next();
+                    }
+                    let limit = Limit::parse(tokens)?;
+                    this.memories.push(Memory::new(id, limit));
+                }
+                Keyword::Global => {
+                    let id = tokens.peek().copied().try_id();
+                    if id.is_some() {
+                        let _ = tokens.next();
+                    }
+                }
+                Keyword::Elem => {}
+                Keyword::Data => {}
+                Keyword::Import => {}
+                Keyword::Export => {}
+                Keyword::Start => {}
+                keyword => {
+                    return Err(Error::new(
+                        token.cloned(),
+                        format!(
+                            "Expected top level module import. Got {:?} instead.",
+                            keyword
+                        ),
+                    ));
+                }
+            }
+            tokens.next().expect_right_paren()?;
+            // check if closing
+            if let Ok(()) = tokens.peek().copied().expect_right_paren() {
+                break;
+            }
+        }
+        tokens.next().expect_right_paren()?;
+
+        Ok(this)
+    }
+}
+
 fn order_lists<I, O, FI, FD>(
     list: &[I],
     get_index: FI,
@@ -345,7 +445,7 @@ fn order_lists<I, O, FI, FD>(
 where
     FI: Fn(&I) -> u32,
     FD: Fn(&I) -> Result<O, ValidationError>,
-    O: Clone
+    O: Clone,
 {
     let mut new_list: Vec<(O, u32)> = vec![];
     for item in list.iter() {
@@ -376,11 +476,9 @@ impl ValidateInstruction for Module {
         // Internal memory types, in index order
         let mt = &self.memories.iter().map(|t| &t.ty).collect::<Vec<_>>();
         // Internal Global types, in index order
-        let gt = &self.globals.iter().map(|t| &t.ty).collect::<Vec<_>>();;
+        let gt = &self.globals.iter().map(|t| &t.ty).collect::<Vec<_>>();
         // reference types, in index order
         // let rt = self.ref
-        
-
 
         // validate types are equal
         if ctx.types() != &self.types {

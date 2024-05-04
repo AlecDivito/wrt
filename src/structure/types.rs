@@ -1,7 +1,10 @@
-use std::{fmt::Display, ops::Deref, str::FromStr};
+use std::{fmt::Display, iter::Peekable, ops::Deref, str::FromStr};
 
 use crate::{
-    parse::ParseError,
+    parse::{
+        ast::{read_u32, Expect, Parse},
+        ParseError, Token,
+    },
     validation::{Context, Validation, ValidationError},
 };
 
@@ -223,6 +226,12 @@ pub struct MemoryType {
     limit: Limit,
 }
 
+impl MemoryType {
+    pub fn new(limit: Limit) -> Self {
+        Self { limit }
+    }
+}
+
 impl Validation<()> for MemoryType {
     fn validate(&self, ctx: &Context, _: ()) -> Result<(), ValidationError> {
         let max = 2_u32.pow(16);
@@ -242,6 +251,18 @@ impl Validation<MemoryType> for MemoryType {
 pub struct Limit {
     min: u32,
     max: Option<u32>,
+}
+
+impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for Limit {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        let min = read_u32(tokens.next().expect_number()?)?;
+        let max = if let Ok(max_str) = tokens.peek().copied().expect_number() {
+            Some(read_u32(&max_str)?)
+        } else {
+            None
+        };
+        Ok(Limit { min, max })
+    }
 }
 
 impl Validation<u32> for Limit {

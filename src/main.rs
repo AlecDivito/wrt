@@ -1,12 +1,7 @@
-use std::{
-    env::args,
-    fs,
-    os::unix::ffi::OsStrExt,
-    path::{Path, PathBuf},
-};
+use std::{fs, os::unix::ffi::OsStrExt, path::PathBuf};
 
-use clap::{Args, Command, Parser, Subcommand};
-use wrt::parse::parse;
+use clap::{Parser, Subcommand};
+use wrt::parse::{ast::parse, tokenize};
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -45,7 +40,6 @@ pub struct Options {
 }
 
 impl Options {
-
     fn get_all_tests(&self) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
         if !self.directory.is_dir() {
             println!("{:?} is a file and not a directory", self.directory);
@@ -65,7 +59,7 @@ impl Options {
         }
         Ok(list)
     }
-    
+
     pub fn list_tests(&self) -> Result<(), Box<dyn std::error::Error>> {
         let mut lists = self.get_all_tests()?;
         lists.sort();
@@ -74,14 +68,14 @@ impl Options {
         }
         Ok(())
     }
-    
+
     pub fn test_all(&self) -> Result<(), Box<dyn std::error::Error>> {
         let lists = self.get_all_tests()?;
         let mut pass = 0;
         let mut fail = 0;
         for item in &lists {
-            let contents = std::fs::read_to_string(&item)?;
-            match parse(&contents) {
+            let contents = std::fs::read_to_string(item)?;
+            match tokenize(&contents) {
                 Ok(_) => {
                     pass += 1;
                     println!("PASS {}", item.file_name().unwrap().to_string_lossy())
@@ -89,39 +83,66 @@ impl Options {
                 Err(err) => {
                     fail += 1;
                     if self.debug {
-                        println!("FAIL {} - {} at {:?}", item.file_name().unwrap().to_string_lossy(), err.error, err.location)
+                        println!(
+                            "FAIL {} - {} at {:?}",
+                            item.file_name().unwrap().to_string_lossy(),
+                            err.error,
+                            err.location
+                        )
                     } else {
                         println!("FAIL {}", item.file_name().unwrap().to_string_lossy())
                     }
-                },
+                }
             };
         }
         println!("Passed {}/{}", pass, lists.len());
-        println!("Failed {}/{}",  fail, lists.len());
+        println!("Failed {}/{}", fail, lists.len());
         Ok(())
     }
-    
-    pub fn test_single(&self, file: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-        if !file.is_file() {
-            return Ok(())
-        }
+
+    pub fn test_single(&self, name: String) -> Result<(), Box<dyn std::error::Error>> {
+        let file = if self.directory.join(&name).is_file() {
+            self.directory.join(name)
+        } else if self.directory.join(format!("{}.wast", &name)).is_file() {
+            self.directory.join(format!("{}.wast", name))
+        } else if PathBuf::from(&name).is_file() {
+            PathBuf::from(name)
+        } else {
+            println!("Error: file {} does not exist", name);
+            return Ok(());
+        };
+
         let contents = fs::read_to_string(file)?;
-        match parse(&contents) {
+        let tokens = match tokenize(&contents) {
             Ok(tokens) => {
-                println!("{:?}", tokens);
-            },
+                println!("Scanning file and converting to tokens");
+                if self.debug {
+                    println!("{:?}", tokens);
+                }
+                println!("Tokenization complete");
+                tokens
+            }
             Err(err) => {
                 if self.debug {
-                    println!("Parse Error: {:?}", err)
+                    println!("Scan Error: {:?}", err)
                 } else {
-                    println!("Parse Error: {:?} at location {:?}", err.error, err.location)
+                    println!("Scan Error: {:?} at location {:?}", err.error, err.location)
                 }
-            },
+                return Ok(());
+            }
+        };
+
+        match parse(tokens) {
+            Ok(module) => {
+                todo!()
+            }
+            Err(err) => {
+                println!("Parse {:?}", err)
+            }
         }
         Ok(())
     }
 }
-
 
 fn main() {
     let cli = Cli::parse();
@@ -135,7 +156,7 @@ fn main() {
             match test.tests {
                 TestCommands::List => opts.list_tests(),
                 TestCommands::All => opts.test_all(),
-                TestCommands::File { name } => opts.test_single(test.directory.join(name)),
+                TestCommands::File { name } => opts.test_single(name),
             }
         }
     } {
