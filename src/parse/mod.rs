@@ -1,9 +1,12 @@
 use std::{iter::Peekable, str::FromStr};
 
-use crate::{execution::{Number, Value}, structure::types::{
-    Direction, FloatType, FloatVectorShape, HalfType, IntType, IntegerVectorShape, MemoryWidth,
-    MemoryZeroWidth, NumType, SignType, VectorShape,
-}};
+use crate::{
+    execution::{Number, Value},
+    structure::types::{
+        Direction, FloatType, FloatVectorShape, HalfType, IntType, IntegerVectorShape, MemoryWidth,
+        MemoryZeroWidth, NumType, SignType, VectorShape,
+    },
+};
 
 #[derive(Debug)]
 pub struct Location {
@@ -130,8 +133,8 @@ pub enum Keyword {
     I64Store16,
     I64Store32,
 
-    MemArgsAlign(u32),
-    MemArgsOffset(u32),
+    MemArgsAlign(String), // (u32),
+    MemArgsOffset(String), // (u32),
 
     // text block types
     Type,
@@ -361,7 +364,9 @@ pub enum Keyword {
     AssertTrap,
     AssertExhaustion,
     NaNCanonical,
-    NaNArithmetic,
+    NaNArithmetic(String),
+    Infinit,
+    NaN,
     Input,
     Output,
 }
@@ -918,26 +923,36 @@ impl FromStr for Keyword {
             "assert_trap" => AssertTrap,
             "assert_exhaustion" => AssertExhaustion,
             "nan:canonical" => NaNCanonical,
-            "nan:arithmetic" => NaNArithmetic,
+            "inf" => Infinit,
+            "nan" => NaN,
             "input" => Input,
             "output" => Output,
-            str if str.starts_with("align=") =>  {
-                let amount = match str.split('=').nth(1).unwrap().parse::<u32>() {
-                    Ok(amount) => amount,
-                    Err(err) => {
-                        return Err(ParseError::new(format!("Parsing `align` of memory args was determine to be not be a number. Failed to parse {} with error {:?}", str, err)))
+            str if str.starts_with("nan:") => {
+                let amount = match str.split(':').nth(1) {
+                    Some(amount) => amount,
+                    None => {
+                        return Err(ParseError::new(format!("Parsing `nan:`. Determine to be not be a number. Failed to parse {}", str)))
                     },
                 };
-                MemArgsAlign(amount)
+                NaNArithmetic(amount.to_string())
+            }
+            str if str.starts_with("align=") =>  {
+                let amount = match str.split('=').nth(1) {
+                    Some(amount) => amount, // Parse Hex Number
+                    None => {
+                        return Err(ParseError::new(format!("Parsing `align` of memory args was determine to be not be a number. Failed to parse {}", str)))
+                    },
+                };
+                MemArgsAlign(amount.to_string())
             }
             str if str.starts_with("offset=") =>  {
-                let amount = match str.split('=').nth(1).unwrap().parse::<u32>() {
-                    Ok(amount) => amount,
-                    Err(err) => {
-                        return Err(ParseError::new(format!("Parsing `offset` of memory args was determine to be not be a number. Failed to parse {} with error {:?}", str, err)))
+                let amount = match str.split('=').nth(1) {
+                    Some(amount) => amount,
+                    NOne => {
+                        return Err(ParseError::new(format!("Parsing `offset` of memory args was determine to be not be a number. Failed to parse {}", str)))
                     },
                 };
-                MemArgsOffset(amount)
+                MemArgsOffset(amount.to_string())
             }
             str => return Err(ParseError::new(format!("{} is not a keyword", str))),
         })
@@ -1103,6 +1118,21 @@ where
         self.source.peek()
     }
 
+    pub fn peek_token(&mut self) -> Option<SoftToken> {
+        match self.source.peek() {
+            Some(character) => {
+                if [NEW_LINE, NEW_LINE_2, CLCR].contains(character) {
+                    Some(SoftToken::NewLine)
+                } else if [SPACE, TAB].contains(character) {
+                    Some(SoftToken::Whitespace)
+                } else {
+                    Some(SoftToken::Char(*character))
+                }
+            }
+            None => None,
+        }
+    }
+
     pub fn read(&mut self) -> Option<char> {
         if let Some(char) = self.source.next() {
             self.index += 1;
@@ -1223,32 +1253,38 @@ where
                     let line = self.reader.line;
                     let column = self.reader.column;
                     let index = self.reader.index;
-                    let (ty, source) = match (c, self.reader.peek()) {
-                        ('0', Some('x')) => {
-                            self.reader.pop().unwrap();
-                            (TokenType::UnsignedHex, self.read_hex_digit(None, true))
-                        },
-                        ('-', Some(_)) | ('+', Some(_)) => {
-                            if *self.reader.peek().unwrap() == '0' {
-                                self.reader.pop().unwrap();
-                            }
-                            match self.reader.peek() {
-                                Some('x') => {
-                                    self.reader.pop().unwrap();
-                                    (TokenType::SignedHex, self.read_hex_digit(Some(c), true))
-                                }
-                                _ => (TokenType::SignedNumber, self.read_hex_digit(Some(c), false))
-                            } 
-                        }
-                        (c, _) => 
-                            (TokenType::UnsignedNumber, self.read_hex_digit(Some(c), false)) 
-                    };
+
+                    let ty = TokenType::UnsignedHex;
+                    let source = self.read_until_delimiter(c);
+
+                    // let (ty, source) = match (c, self.reader.peek()) {
+                    //     ('0', Some('x')) => {
+                    //         self.reader.pop().unwrap();
+                    //         (TokenType::UnsignedHex, self.read_hex_digit(None, true))
+                    //     }
+                    //     ('-', Some(_)) | ('+', Some(_)) => {
+                    //         if *self.reader.peek().unwrap() == '0' {
+                    //             self.reader.pop().unwrap();
+                    //         }
+                    //         match self.reader.peek() {
+                    //             Some('x') => {
+                    //                 self.reader.pop().unwrap();
+                    //                 (TokenType::SignedHex, self.read_hex_digit(Some(c), true))
+                    //             }
+                    //             _ => (TokenType::SignedNumber, self.read_hex_digit(Some(c), false)),
+                    //         }
+                    //     }
+                    //     (c, _) => (
+                    //         TokenType::UnsignedNumber,
+                    //         self.read_hex_digit(Some(c), false),
+                    //     ),
+                    // };
                     Some(Token {
                         ty,
                         line,
                         column,
                         index,
-                        source: source?,
+                        source,
                     })
                 }
                 c if c.is_ascii_lowercase() => Some(self.read_keyword(c)?),
@@ -1262,7 +1298,11 @@ where
         Ok(())
     }
 
-    fn read_hex_digit(&mut self, starting_char: Option<char>, is_hex: bool) -> Result<String, ParseError> {
+    fn read_hex_digit(
+        &mut self,
+        starting_char: Option<char>,
+        is_hex: bool,
+    ) -> Result<String, ParseError> {
         let mut chars = if let Some(c) = starting_char {
             vec![c]
         } else {
@@ -1270,7 +1310,7 @@ where
         };
         while let Some(character) = self.reader.peek() {
             // First character must be a hex digit
-            if !HEX_DIGIT.contains(character) {
+            if !(HEX_DIGIT.contains(character) || *character == '_') {
                 if chars.is_empty() {
                     return Err(ParseError::new(format!(
                         "character {} is not valid. List of chars {:?}",
@@ -1281,7 +1321,7 @@ where
                 }
             }
             match self.reader.pop() {
-                Some(SoftToken::Char('_')) => continue,
+                Some(SoftToken::Char('_')) => chars.push('_'),
                 Some(SoftToken::Char(c)) if HEX_DIGIT.contains(&c) && is_hex => chars.push(c),
                 Some(SoftToken::Char(c)) if DIGIT.contains(&c) && !is_hex => chars.push(c),
                 char => {
@@ -1397,9 +1437,10 @@ where
         let index = self.reader.index;
         let column = self.reader.column;
         let mut chars = vec![];
-        while let Some(c) = self.reader.pop() {
+        while let Some(c) = self.reader.peek_token() {
             match c {
                 SoftToken::Char(c) if c.is_ascii_alphanumeric() || ID_CHAR.contains(&c) => {
+                    let _ = self.reader.pop();
                     chars.push(c)
                 }
                 _ => break,
@@ -1436,6 +1477,17 @@ where
             source,
             ty: TokenType::Keyword(ty),
         })
+    }
+
+    fn read_until_delimiter(&mut self, first: char) -> String {
+        let mut tokens = vec![first];
+        while let Some(c) = self.reader.pop() {
+            match c {
+                SoftToken::Char(c) => tokens.push(c),
+                _ => break,
+            }
+        }
+        tokens.iter().collect::<String>()
     }
 
     fn read_until_new_line(&mut self) {
