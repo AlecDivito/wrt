@@ -1016,6 +1016,9 @@ const HEX_DIGIT: [char; 22] = [
     'A', 'B', 'C', 'D', 'E', 'F', 'a', 'b', 'c', 'd', 'e', 'f', '0', '1', '2', '3', '4', '5', '6',
     '7', '8', '9',
 ];
+const ALL_NUMBER: [char; 13] = [
+    '_', '+', '-', 'x', '.', 'e', 'E', 'p', 'P', 'n', 'f', 'a', 'i',
+];
 // let hexnum = hexdigit ('_'? hexdigit)*
 
 enum NumberString {
@@ -1189,7 +1192,7 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
     line: usize,
     column: usize,
@@ -1201,6 +1204,10 @@ pub struct Token {
 impl Token {
     pub fn ty(&self) -> &TokenType {
         &self.ty
+    }
+
+    pub fn source(&self) -> &str {
+        &self.source
     }
 }
 
@@ -1461,10 +1468,11 @@ where
 
     fn read_until_delimiter(&mut self, first: char) -> String {
         let mut tokens = vec![first];
-        while let Some(c) = self.reader.pop() {
-            match c {
-                SoftToken::Char(c) => tokens.push(c),
-                _ => break,
+        while let Some(c) = self.reader.peek() {
+            if c.is_ascii_hexdigit() || ALL_NUMBER.contains(&c) {
+                tokens.push(self.reader.read().unwrap());
+            } else {
+                break;
             }
         }
         tokens.iter().collect::<String>()

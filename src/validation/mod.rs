@@ -44,7 +44,7 @@ pub mod instruction;
 use std::convert::TryFrom;
 
 use crate::structure::types::{
-    FunctionIndex, FunctionType, GlobalType, MemoryType, RefType, ResultType, TableType, ValueType
+    FunctionIndex, FunctionType, GlobalType, MemoryType, RefType, ResultType, TableType, ValueType,
 };
 
 /// Representation of the validation context of a [Data] segment inside of a
@@ -95,7 +95,7 @@ impl Context {
     }
 
     pub fn get_memory(&self, index: Option<u32>) -> Result<&MemoryType, ValidationError> {
-        let i =  match index {
+        let i = match index {
             Some(x) => usize::try_from(x).map_err(|_| ValidationError::new())?,
             None => 0,
         };
@@ -104,16 +104,18 @@ impl Context {
 
     pub fn get_label(&self, index: u32) -> Result<&ResultType, ValidationError> {
         // Note: We are supposed to push labels to the index 0 when we add them,
-        // but thats wasteful so here we go, pre-mature optimization! :) 
+        // but thats wasteful so here we go, pre-mature optimization! :)
         //
         // We will push and pop labels instead basically meaning the list is in
         // reverse. Meaning indexing will also be in reverse
         let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
         if self.labels.is_empty() || self.labels.len() <= index {
-            return Err(ValidationError::new())
+            return Err(ValidationError::new());
         } else {
             let max_size = self.labels.len() - 1;
-            self.labels.get(max_size - index).ok_or_else(ValidationError::new)
+            self.labels
+                .get(max_size - index)
+                .ok_or_else(ValidationError::new)
         }
     }
 
@@ -121,7 +123,7 @@ impl Context {
         self.labels.push(ty)
     }
 
-    pub fn remove_prepend_label(&mut self)-> Result<ResultType, ValidationError> {
+    pub fn remove_prepend_label(&mut self) -> Result<ResultType, ValidationError> {
         self.labels.pop().ok_or_else(ValidationError::new)
     }
 
@@ -153,7 +155,7 @@ impl Context {
                 Ok(())
             }
             Some(GlobalType::Const(_)) => Err(ValidationError::new()),
-            None => Err(ValidationError::new())
+            None => Err(ValidationError::new()),
         }
     }
 
@@ -170,7 +172,7 @@ impl Context {
     fn contains_reference(&self, arg: u32) -> bool {
         self.references.contains(&arg)
     }
-    
+
     pub fn returning(&self) -> Option<&ResultType> {
         self.returning.as_ref()
     }
@@ -180,33 +182,31 @@ impl Context {
         self.labels = vec![ty.output().clone()];
         self.returning = Some(ty.output().clone());
     }
-    
+
     pub fn types(&self) -> &[FunctionType] {
         &self.types
     }
-    
+
     pub fn functions(&self) -> &Vec<FunctionType> {
         &self.functions
     }
-    
+
     pub fn locals(&self) -> &[ValueType] {
         &self.locals
     }
-    
+
     pub fn labels(&self) -> &[ResultType] {
         &self.labels
     }
-    
+
     pub fn datas(&self) -> &[Ok] {
         &self.datas
     }
-    
+
     pub fn memories(&self) -> &[MemoryType] {
         &self.memories
     }
-
 }
-
 
 pub trait Validation<Extra> {
     /// Validate if the structure is valid.
@@ -231,7 +231,6 @@ impl Input {
     }
 }
 
-
 pub trait ValidateInstruction {
     // type Output: IntoIterator<Item = ValueType>;
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>>;
@@ -248,7 +247,7 @@ impl ValidateInstruction for InstructionSequence {
             // https://webassembly.github.io/spec/core/valid/instructions.html#non-empty-instruction-sequence-xref-syntax-instructions-syntax-instr-mathit-instr-ast-xref-syntax-instructions-syntax-instr-mathit-instr-n
             let output = self.instructions[index].validate(ctx, inputs)?;
             if index == self.instructions.len() - 1 {
-                return Ok(output)
+                return Ok(output);
             } else {
                 inputs.0.extend(output);
             }
@@ -257,11 +256,17 @@ impl ValidateInstruction for InstructionSequence {
     }
 }
 
-/// Used for function bodies, global initialization values, elements and offsets of 
+/// Used for function bodies, global initialization values, elements and offsets of
 /// element segments and offsets of data segments are given as expressions which
 /// are sequences of instructions terminated by an end marker.
 pub struct Expression {
     instructions: Vec<Box<dyn ValidateInstruction>>,
+}
+
+impl Expression {
+    pub fn new(instructions: Vec<Box<dyn ValidateInstruction>>) -> Self {
+        Self { instructions }
+    }
 }
 
 impl ValidateInstruction for Expression {
@@ -271,7 +276,7 @@ impl ValidateInstruction for Expression {
             // https://webassembly.github.io/spec/core/valid/instructions.html#non-empty-instruction-sequence-xref-syntax-instructions-syntax-instr-mathit-instr-ast-xref-syntax-instructions-syntax-instr-mathit-instr-n
             let output = self.instructions[index].validate(ctx, inputs)?;
             if index == self.instructions.len() - 1 {
-                return Ok(output)
+                return Ok(output);
             } else {
                 inputs.0.extend(output);
             }
@@ -295,7 +300,7 @@ impl ValidateInstruction for ConstantExpression {
             // because right now other parts of the program depend on these only being constant commands
             let output = self.instructions[index].validate(ctx, inputs)?;
             if index == self.instructions.len() - 1 {
-                return Ok(output)
+                return Ok(output);
             } else {
                 inputs.0.extend(output);
             }

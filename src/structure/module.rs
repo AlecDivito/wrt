@@ -1,8 +1,8 @@
 use crate::parse::{
     ast::{Error, Expect, IntoResult, TryGet},
-    Keyword,
+    Keyword, TokenType,
 };
-use std::{collections::HashSet, iter::Peekable, ops::Deref};
+use std::{collections::HashSet, convert::TryInto, iter::Peekable, ops::Deref};
 
 use crate::{
     parse::{ast::Parse, Token},
@@ -14,15 +14,11 @@ use crate::{
 
 use super::types::{
     FunctionIndex, FunctionType, GlobalIndex, GlobalType, Limit, MemoryIndex, MemoryType, RefType,
-    TableIndex, TableType, TypeIndex, ValueType,
+    ResultType, TableIndex, TableType, TypeIndex, ValueType,
 };
 
 /// The definition of a function
 pub struct Function {
-    // TODO(Alec): This is temporary work around for not having an identifier list
-    // instead we will just keep our id's on the object
-    id: Option<String>,
-
     // An index to the signature of the function. Can be found in the module.
     // Accessible through local indices.
     ty_index: TypeIndex,
@@ -35,6 +31,16 @@ pub struct Function {
     // A sequence of instructions. When complete the stack should match the function
     // result type.
     body: Expression,
+}
+
+impl Function {
+    pub fn new(ty_index: TypeIndex, locals: Vec<ValueType>, body: Expression) -> Self {
+        Self {
+            ty_index,
+            locals,
+            body,
+        }
+    }
 }
 
 impl ValidateInstruction for Function {
@@ -268,6 +274,12 @@ pub struct Export {
     description: ExportDescription,
 }
 
+impl Export {
+    pub fn new(name: String, description: ExportDescription) -> Self {
+        Self { name, description }
+    }
+}
+
 impl ValidateInstruction for Export {
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         self.description.validate(ctx, inputs)
@@ -324,7 +336,14 @@ impl ValidateInstruction for Import {
 }
 
 #[derive(Default)]
+pub struct IDCtx {
+    funcs: Vec<Option<String>>,
+}
+
+#[derive(Default)]
 pub struct Module {
+    id_ctx: IDCtx,
+
     // Types definitions inside of the web assembly
     types: Vec<FunctionType>,
 
@@ -361,6 +380,11 @@ pub struct Module {
     start: Option<StartFunction>,
 }
 
+pub fn get_id<'a, I: Iterator<Item = &'a Token>>(iter: &mut Peekable<I>) -> Option<String> {
+    iter.next_if(|t| t.ty() == &TokenType::Id)
+        .map(|token| token.source().to_string())
+}
+
 impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for Module {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, Error> {
         let mut this = Module::default();
@@ -372,43 +396,135 @@ impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for Module {
             let token = tokens.next();
             match token.expect_keyword()? {
                 Keyword::Type => {
-                    let id = tokens.peek().copied().try_id();
-                    if id.is_some() {
-                        let _ = tokens.next();
-                    }
+                    let id = get_id(tokens);
                 }
                 Keyword::Func => {
-                    let id = tokens.peek().copied().try_id();
-                    if id.is_some() {
-                        let _ = tokens.next();
+                    this.id_ctx.funcs.push(get_id(tokens));
+                    let mut params = ResultType(vec![]);
+                    let mut result = ResultType(vec![]);
+                    let mut locals = vec![];
+                    let mut import = None;
+                    let mut export = None;
+                    let mut instructions = vec![];
+
+                    // Get the function definition
+                    loop {
+                        if tokens.peek().copied().try_right_paran().is_some() {
+                            break;
+                        }
+                        tokens.next().expect_left_paren()?;
+                        let token = tokens.peek().copied();
+                        match token.expect_keyword()? {
+                            Keyword::Type => {
+                                todo!("Please fix me")
+                            }
+                            Keyword::Export => {
+                                let _ = tokens.next();
+                                if export.is_some() {
+                                    return Err(Error::new(
+                                        token.cloned(),
+                                        "multiple 'export' blocks on func",
+                                    ));
+                                }
+                                let export_name = tokens.next().expect_string()?;
+                                export = Some(export_name);
+                            }
+                            Keyword::Import => {
+                                let _ = tokens.next();
+                                if import.is_some() {
+                                    return Err(Error::new(
+                                        token.cloned(),
+                                        "multiple 'import' blocks on func",
+                                    ));
+                                }
+                                let module = tokens.next().expect_string()?;
+                                let func = tokens.next().expect_string()?;
+                                import = Some((module, func))
+                            }
+                            Keyword::Param => {
+                                let _ = tokens.next();
+                                params =
+                                    ResultType([params.0, ResultType::parse(tokens)?.0].concat());
+                            }
+                            Keyword::Result => {
+                                let _ = tokens.next();
+                                result =
+                                    ResultType([result.0, ResultType::parse(tokens)?.0].concat());
+                            }
+                            _ => break,
+                        }
+                        tokens.next().expect_right_paren()?;
+                    }
+                    // Get all locals
+                    loop {
+                        if tokens.peek().copied().try_right_paran().is_some() {
+                            break;
+                        }
+                        tokens.next().expect_left_paren()?;
+                        let token = tokens.peek().copied();
+                        match token.expect_keyword()? {
+                            Keyword::Local => {
+                                tokens.next().expect_keyword_token(Keyword::Local)?;
+                                locals.push(ValueType::parse(tokens)?)
+                            }
+                            _ => break,
+                        }
+                        tokens.next().expect_right_paren()?;
+                    }
+                    // Get the instructions for the function
+                    loop {
+                        if tokens.peek().copied().try_right_paran().is_some() {
+                            break;
+                        }
+                        tokens.next().expect_left_paren()?;
+                        let token = tokens.peek().copied();
+                        // https://webassembly.github.io/spec/core/text/instructions.html#control-instructions
+                        match token.expect_keyword()? {
+                            // Block Instruction
+                            Keyword::Block => {
+                                tokens.next().expect_keyword_token(Keyword::Block)?;
+                                let _id = get_id(tokens);
+                            }
+                            Keyword::Loop => {}
+                            Keyword::If => {}
+
+                            // Plain Instruction
+                            Keyword::Unreachable => {}
+                            Keyword::Nop => {}
+                            Keyword::Br => {}
+                            Keyword::BrIf => {}
+                            Keyword::BrTable => {}
+                            Keyword::Return => {}
+                            Keyword::Call => {}
+                            Keyword::CallIndirect => {}
+
+                            _ => todo!("hello"),
+                        }
+                        tokens.next().expect_right_paren()?;
                     }
 
-                    // let next = tokens.next();
-
-                    // match tokens.next().expect_keyword()? {
-                    //     Keyword::Export => {}
-                    //     Keyword::
-                    // }
+                    // Function loop completed. Add everything parsed to the module
+                    let expression = Expression::new(instructions);
+                    this.types.push(FunctionType::new(params, result));
+                    let ty_index = (this.types.len() - 1).try_into().unwrap();
+                    this.functions
+                        .push(Function::new(ty_index, locals, expression));
+                    if let Some(name) = export {
+                        let index = (this.functions.len() - 1).try_into().unwrap();
+                        this.export
+                            .push(Export::new(name, ExportDescription::Func(index)))
+                    }
                 }
                 Keyword::Table => {
-                    let id = tokens.peek().copied().try_id();
-                    if id.is_some() {
-                        let _ = tokens.next();
-                    }
+                    let id = get_id(tokens);
                 }
                 Keyword::Memory => {
-                    let id = tokens.peek().copied().try_id();
-                    if id.is_some() {
-                        let _ = tokens.next();
-                    }
+                    let id = get_id(tokens);
                     let limit = Limit::parse(tokens)?;
                     this.memories.push(Memory::new(id, limit));
                 }
                 Keyword::Global => {
-                    let id = tokens.peek().copied().try_id();
-                    if id.is_some() {
-                        let _ = tokens.next();
-                    }
+                    let id = get_id(tokens);
                 }
                 Keyword::Elem => {}
                 Keyword::Data => {}

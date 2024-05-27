@@ -1,9 +1,9 @@
-use std::{fmt::Display, iter::Peekable, ops::Deref, str::FromStr};
+use std::{fmt::Display, iter::Peekable, ops::Deref};
 
 use crate::{
     parse::{
-        ast::{read_u32, Expect, Parse},
-        ParseError, Token,
+        ast::{read_u32, Error, Expect, Parse},
+        Keyword, Token,
     },
     validation::{Context, Validation, ValidationError},
 };
@@ -315,6 +315,10 @@ pub struct FunctionType {
 }
 
 impl FunctionType {
+    pub fn new(input: ResultType, output: ResultType) -> Self {
+        Self { input, output }
+    }
+
     pub fn empty() -> Self {
         Self {
             input: ResultType(vec![]),
@@ -359,6 +363,19 @@ impl Validation<FunctionType> for FunctionType {
 /// a function. Its a sequence of values
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResultType(pub Vec<ValueType>);
+
+impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for ResultType {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        let mut tys = vec![];
+        loop {
+            tys.push(ValueType::parse(tokens)?);
+            if let Ok(()) = tokens.peek().copied().expect_right_paren() {
+                break;
+            }
+        }
+        return Ok(ResultType(tys));
+    }
+}
 
 impl Deref for ResultType {
     type Target = Vec<ValueType>;
@@ -437,6 +454,21 @@ impl ValueType {
         } else {
             Err(ValidationError::new())
         }
+    }
+}
+
+impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for ValueType {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        let token = tokens.peek();
+        let value = match token.copied().expect_keyword()? {
+            Keyword::I32 => ValueType::Num(NumType::I32),
+            Keyword::I64 => ValueType::Num(NumType::I64),
+            Keyword::F32 => ValueType::Num(NumType::F32),
+            Keyword::F64 => ValueType::Num(NumType::F64),
+            _ => return Err(Error::new(token.cloned().cloned(), "Unexpected keyword")),
+        };
+        let _ = tokens.next();
+        Ok(value)
     }
 }
 

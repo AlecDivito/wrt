@@ -1,6 +1,6 @@
 use std::iter::Peekable;
 
-use crate::structure::module::Module;
+use crate::structure::{module::Module, types::SignType};
 
 use super::{Keyword, Token, TokenType};
 
@@ -19,8 +19,15 @@ pub struct Error {
 }
 
 impl Error {
-    pub fn new(token: Option<Token>, error: String) -> Self {
-        Self { token, error }
+    pub fn new(token: Option<Token>, error: impl ToString) -> Self {
+        Self {
+            token,
+            error: error.to_string(),
+        }
+    }
+
+    pub fn token(&self) -> Option<&Token> {
+        self.token.as_ref()
     }
 }
 
@@ -31,6 +38,8 @@ pub trait Expect<'a> {
 
     fn expect_number(&'a self) -> Result<&'a Token, Error>;
 
+    fn expect_string(&self) -> Result<String, Error>;
+
     fn expect_keyword_token(&self, ty: Keyword) -> Result<(), Error>;
 
     fn expect_keyword(&self) -> Result<Keyword, Error>;
@@ -38,6 +47,8 @@ pub trait Expect<'a> {
 
 pub trait TryGet {
     fn try_id(&self) -> Option<String>;
+
+    fn try_right_paran(&self) -> Option<()>;
 }
 
 pub trait IntoResult<T> {
@@ -65,6 +76,14 @@ impl TryGet for Option<&Token> {
             None
         }
     }
+
+    fn try_right_paran(&self) -> Option<()> {
+        if (*self)?.ty == TokenType::RightParen {
+            Some(())
+        } else {
+            None
+        }
+    }
 }
 
 impl<'a> Expect<'a> for Option<&'a Token> {
@@ -82,7 +101,7 @@ impl<'a> Expect<'a> for Option<&'a Token> {
 
     fn expect_right_paren(&self) -> Result<(), Error> {
         if let Some(token) = self {
-            if token.ty == TokenType::LeftParen {
+            if token.ty == TokenType::RightParen {
                 return Ok(());
             }
         }
@@ -116,6 +135,18 @@ impl<'a> Expect<'a> for Option<&'a Token> {
         }
     }
 
+    fn expect_string(&self) -> Result<String, Error> {
+        if let Some(token) = self {
+            if token.ty == TokenType::String {
+                return Ok(token.source.clone());
+            }
+        }
+        Err(Error {
+            token: self.map(Clone::clone),
+            error: "Expected string".to_string(),
+        })
+    }
+
     fn expect_keyword(&self) -> Result<Keyword, Error> {
         if let Some(token) = self {
             if let TokenType::Keyword(key) = &token.ty {
@@ -129,11 +160,42 @@ impl<'a> Expect<'a> for Option<&'a Token> {
     }
 }
 
-pub fn read_u32(str: &Token) -> Result<u32, Error> {
-    todo!();
+// pub fn read_sign<I: Iterator<Item = char>>(iter: Peekable<I>) -> Result<Option<SignType>, Error> {
+//     match iter.peek() {
+//        Some('+') => Ok(SignType::),
+//        Some('-') => todo!(),
+//        Some(_) => Ok(None),
+//        None =>
+//    }
+// }
+
+pub fn read_u32(token: &Token) -> Result<u32, Error> {
+    let number = if token.source.starts_with("0x") {
+        u32::from_str_radix(token.source.trim_start_matches("0x"), 16)
+            .map_err(|err| Error::new(Some(token.clone()), format!("Error parsing u32: {:?}", err)))
+    } else {
+        token
+            .source
+            .parse::<u32>()
+            .map_err(|err| Error::new(Some(token.clone()), format!("Error parsing u32: {:?}", err)))
+    }?;
+    Ok(number)
 }
 
-pub fn parse(tokens: Vec<Token>) -> Result<Module, Error> {
+pub fn read_u64(token: &Token) -> Result<u64, Error> {
+    let number = if token.source.starts_with("0x") {
+        u64::from_str_radix(token.source.trim_start_matches("0x"), 16)
+            .map_err(|err| Error::new(Some(token.clone()), format!("Error parsing u64: {:?}", err)))
+    } else {
+        token
+            .source
+            .parse::<u64>()
+            .map_err(|err| Error::new(Some(token.clone()), format!("Error parsing u64: {:?}", err)))
+    }?;
+    Ok(number)
+}
+
+pub fn parse(tokens: &[Token]) -> Result<Module, Error> {
     let mut iter = tokens.iter().peekable();
     Module::parse(&mut iter)
 }

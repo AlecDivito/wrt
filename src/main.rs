@@ -1,7 +1,7 @@
 use std::{fs, os::unix::ffi::OsStrExt, path::PathBuf};
 
 use clap::{Parser, Subcommand};
-use wrt::parse::{ast::parse, tokenize};
+use wrt::parse::{ast::parse, tokenize, Token};
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -132,12 +132,34 @@ impl Options {
             }
         };
 
-        match parse(tokens) {
+        match parse(&tokens) {
             Ok(module) => {
                 todo!()
             }
             Err(err) => {
-                println!("Parse {:?}", err)
+                let range = if let Some(token) = &err.token() {
+                    if let Some(index) = tokens.iter().position(|t| t == *token) {
+                        if index == 0 {
+                            tokens.get(0..=5).unwrap().to_vec()
+                        } else {
+                            tokens.get(index - 2..=index + 2).unwrap().to_vec()
+                        }
+                    } else {
+                        todo!(
+                            "i don't care about this error, please deal with me {:?}",
+                            token
+                        )
+                    }
+                } else {
+                    vec![]
+                };
+
+                println!("ERROR");
+                println!("========================================");
+                println!("{:?}", range);
+                let tokens = range.iter().map(|t| t.source()).collect::<Vec<_>>();
+                println!("Tokens around error: {:?}", tokens);
+                println!("Parsing encounted error {:?}", err)
             }
         }
         Ok(())
