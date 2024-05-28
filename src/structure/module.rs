@@ -12,16 +12,20 @@ use crate::{
     },
 };
 
-use super::types::{
-    FunctionIndex, FunctionType, GlobalIndex, GlobalType, Limit, MemoryIndex, MemoryType, RefType,
-    ResultType, TableIndex, TableType, TypeIndex, ValueType,
-};
+use super::{types::{
+    BlockInstruction, FuncParam, FuncResult, FuncType, FunctionIndex, FunctionType, GlobalIndex, GlobalType, Limit, MemoryIndex, MemoryType, RefType, RelativeExport, RelativeImport, ResultType, TableIndex, TableType, TypeIndex, ValueType
+}, util::IndexedVec};
+
+pub enum FnType {
+    Index(TypeIndex),
+    Coded(Box<FunctionType>)
+}
 
 /// The definition of a function
 pub struct Function {
     // An index to the signature of the function. Can be found in the module.
     // Accessible through local indices.
-    ty_index: TypeIndex,
+    ty_index: FnType,
 
     // Vector of mutable local variables and their types. Index of the first local
     // is the smallest index not referencing a parameter (ex. if there are 3 parameters
@@ -34,7 +38,7 @@ pub struct Function {
 }
 
 impl Function {
-    pub fn new(ty_index: TypeIndex, locals: Vec<ValueType>, body: Expression) -> Self {
+    pub fn new(ty_index: FnType, locals: Vec<ValueType>, body: Expression) -> Self {
         Self {
             ty_index,
             locals,
@@ -45,16 +49,19 @@ impl Function {
 
 impl ValidateInstruction for Function {
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let ty = ctx.get_type(self.ty_index)?;
+        let ty = match &self.ty_index {
+            FnType::Index(index) => ctx.get_type(*index)?,
+            FnType::Coded(ty) => &*ty,
+        };
         let mut ctx1 = ctx.clone();
         // locals set to the sequence [func input args, locals]
         // labels set to singular sequence containing only [func result type]
         // return set to the [func result type]
-        let locals = [ty.input().deref().clone(), self.locals.clone()].concat();
+        let locals = [ty.input().values(), &self.locals].concat();
         ctx1.prepare_function_execution(locals, ty);
 
         let output = self.body.validate(&mut ctx1, inputs)?;
-        if output == *ty.output().deref() {
+        if output == *ty.output().values() {
             Ok(output)
         } else {
             Err(ValidationError::new())
@@ -230,7 +237,7 @@ pub struct StartFunction(FunctionIndex);
 impl ValidateInstruction for StartFunction {
     fn validate(&self, ctx: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
         let ty = ctx.get_function(self.0)?;
-        if ty.input().is_empty() && ty.output().is_empty() {
+        if ty.input().values().is_empty() && ty.output().values().is_empty() {
             Ok(vec![])
         } else {
             Err(ValidationError::new())
@@ -345,7 +352,7 @@ pub struct Module {
     id_ctx: IDCtx,
 
     // Types definitions inside of the web assembly
-    types: Vec<FunctionType>,
+    types: IndexedVec<FunctionType>,
 
     // Functions inside of the module
     functions: Vec<Function>,
@@ -385,26 +392,29 @@ pub fn get_id<'a, I: Iterator<Item = &'a Token>>(iter: &mut Peekable<I>) -> Opti
         .map(|token| token.source().to_string())
 }
 
-impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for Module {
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Module {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, Error> {
         let mut this = Module::default();
         tokens.next().expect_left_paren()?;
         tokens.next().expect_keyword_token(Keyword::Module)?;
 
         loop {
-            tokens.next().expect_left_paren()?;
-            let token = tokens.next();
-            match token.expect_keyword()? {
+            tokens.peek().copied().expect_left_paren()?;
+            match tokens.clone().nth(1).expect_keyword()? {
                 Keyword::Type => {
-                    let id = get_id(tokens);
+                    let (id, ty) = FuncType::parse(tokens)?.into_parts();
+                    this.types.push(id, ty);
                 }
                 Keyword::Func => {
+                    tokens.next().expect_left_paren()?;
+                    tokens.next().expect_keyword_token(Keyword::Func)?;
                     this.id_ctx.funcs.push(get_id(tokens));
-                    let mut params = ResultType(vec![]);
-                    let mut result = ResultType(vec![]);
+                    let mut params = ResultType::new(vec![]);
+                    let mut result = ResultType::new(vec![]);
                     let mut locals = vec![];
                     let mut import = None;
                     let mut export = None;
+                    let mut func_ty = None;
                     let mut instructions = vec![];
 
                     // Get the function definition
@@ -412,58 +422,58 @@ impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for Module {
                         if tokens.peek().copied().try_right_paran().is_some() {
                             break;
                         }
-                        tokens.next().expect_left_paren()?;
-                        let token = tokens.peek().copied();
-                        match token.expect_keyword()? {
+
+                        tokens.peek().copied().expect_left_paren()?;
+                        match tokens.clone().nth(1).expect_keyword()? {
                             Keyword::Type => {
-                                todo!("Please fix me")
-                            }
-                            Keyword::Export => {
-                                let _ = tokens.next();
-                                if export.is_some() {
+                                if func_ty.is_some() {
                                     return Err(Error::new(
-                                        token.cloned(),
-                                        "multiple 'export' blocks on func",
-                                    ));
+                                        None,
+                                        "multiple 'type' blocks on func",
+                                    ))
                                 }
-                                let export_name = tokens.next().expect_string()?;
-                                export = Some(export_name);
+                                let (id, ty) = FuncType::parse(tokens)?.into_parts();
+                                match id {
+                                    Some(id) if ty.is_empty() => {
+                                        func_ty = Some(this.types.get(&id).ok_or_else(|| Error::new(None, format!("func type id {id} does not exist")))?);
+                                    },
+                                    Some(id) => return Err(Error::new(None, format!("func type id {id} defines types. thats not allowed"))),
+                                    None => return Err(Error::new(None, "func type was not associated with any id"))
+                                }
+                            },
+                            Keyword::Export => {
+                                match &export {
+                                    Some(_) => return Err(Error::new(
+                                        None,
+                                        "multiple 'export' blocks on func",
+                                    )),
+                                    None => {export = Some(RelativeExport::parse(tokens)?);}
+                                }
                             }
                             Keyword::Import => {
-                                let _ = tokens.next();
-                                if import.is_some() {
-                                    return Err(Error::new(
-                                        token.cloned(),
+                                match &import {
+                                    Some(_) => return Err(Error::new(
+                                        None,
                                         "multiple 'import' blocks on func",
-                                    ));
+                                    )),
+                                    None => {import = Some(RelativeImport::parse(tokens)?);}
                                 }
-                                let module = tokens.next().expect_string()?;
-                                let func = tokens.next().expect_string()?;
-                                import = Some((module, func))
                             }
-                            Keyword::Param => {
-                                let _ = tokens.next();
-                                params =
-                                    ResultType([params.0, ResultType::parse(tokens)?.0].concat());
-                            }
-                            Keyword::Result => {
-                                let _ = tokens.next();
-                                result =
-                                    ResultType([result.0, ResultType::parse(tokens)?.0].concat());
-                            }
+                            Keyword::Param => params.extend(FuncParam::parse(tokens)?.0),
+                            Keyword::Result => result.extend(FuncResult::parse(tokens)?.0),
                             _ => break,
                         }
-                        tokens.next().expect_right_paren()?;
+                        
                     }
                     // Get all locals
                     loop {
                         if tokens.peek().copied().try_right_paran().is_some() {
                             break;
                         }
-                        tokens.next().expect_left_paren()?;
-                        let token = tokens.peek().copied();
-                        match token.expect_keyword()? {
+                        tokens.peek().copied().expect_left_paren()?;
+                        match tokens.clone().nth(1).expect_keyword()? {
                             Keyword::Local => {
+                                tokens.next().expect_left_paren()?;
                                 tokens.next().expect_keyword_token(Keyword::Local)?;
                                 locals.push(ValueType::parse(tokens)?)
                             }
@@ -476,14 +486,11 @@ impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for Module {
                         if tokens.peek().copied().try_right_paran().is_some() {
                             break;
                         }
-                        tokens.next().expect_left_paren()?;
-                        let token = tokens.peek().copied();
-                        // https://webassembly.github.io/spec/core/text/instructions.html#control-instructions
-                        match token.expect_keyword()? {
+                        tokens.peek().copied().expect_left_paren()?;
+                        match tokens.clone().nth(1).expect_keyword()? {
                             // Block Instruction
                             Keyword::Block => {
-                                tokens.next().expect_keyword_token(Keyword::Block)?;
-                                let _id = get_id(tokens);
+                                // BlockInstruction::parse(tokens)?;
                             }
                             Keyword::Loop => {}
                             Keyword::If => {}
@@ -504,36 +511,66 @@ impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for Module {
                     }
 
                     // Function loop completed. Add everything parsed to the module
+                    let ty = match func_ty {
+                        Some(ty) if params.is_empty() && result.is_empty() => ty.clone(),
+                        Some(ty) if ty.input().values() == params.values() && ty.output().values() == result.values() => ty.clone(),
+                        None => FunctionType::new(params, result),
+                        Some(ty) => return Err(Error::new(None, "function type and parameters do not match"))
+                    };
+
+
+
                     let expression = Expression::new(instructions);
-                    this.types.push(FunctionType::new(params, result));
-                    let ty_index = (this.types.len() - 1).try_into().unwrap();
-                    this.functions
-                        .push(Function::new(ty_index, locals, expression));
+                    // this.types.push(None, FunctionType::new(params, result));
+                    // let ty_index = (this.types.len() - 1).try_into().unwrap();
+                    this.functions.push(Function::new(FnType::Coded(Box::new(ty)), locals, expression));
                     if let Some(name) = export {
                         let index = (this.functions.len() - 1).try_into().unwrap();
                         this.export
-                            .push(Export::new(name, ExportDescription::Func(index)))
+                            .push(Export::new(name.name, ExportDescription::Func(index)))
                     }
                 }
                 Keyword::Table => {
+                    tokens.next().expect_left_paren()?;
+                    tokens.next().expect_keyword_token(Keyword::Table)?;
                     let id = get_id(tokens);
                 }
                 Keyword::Memory => {
+                    tokens.next().expect_left_paren()?;
+                    tokens.next().expect_keyword_token(Keyword::Memory)?;
                     let id = get_id(tokens);
                     let limit = Limit::parse(tokens)?;
                     this.memories.push(Memory::new(id, limit));
                 }
                 Keyword::Global => {
+                    tokens.next().expect_left_paren()?;
+                    tokens.next().expect_keyword_token(Keyword::Global)?;
                     let id = get_id(tokens);
                 }
-                Keyword::Elem => {}
-                Keyword::Data => {}
-                Keyword::Import => {}
-                Keyword::Export => {}
-                Keyword::Start => {}
+                Keyword::Elem => {
+                    tokens.next().expect_left_paren()?;
+                    tokens.next().expect_keyword_token(Keyword::Elem)?;
+                }
+                Keyword::Data => {
+                    tokens.next().expect_left_paren()?;
+                    tokens.next().expect_keyword_token(Keyword::Data)?;
+                }
+                Keyword::Import => {
+                    tokens.next().expect_left_paren()?;
+                    tokens.next().expect_keyword_token(Keyword::Import)?;
+                }
+                Keyword::Export => {
+                    tokens.next().expect_left_paren()?;
+                    tokens.next().expect_keyword_token(Keyword::Export)?;
+                }
+                Keyword::Start => {
+                    tokens.next().expect_left_paren()?;
+                    tokens.next().expect_keyword_token(Keyword::Start)?;
+                }
                 keyword => {
+                    tokens.next().expect_left_paren()?;
                     return Err(Error::new(
-                        token.cloned(),
+                        tokens.next().cloned(),
                         format!(
                             "Expected top level module import. Got {:?} instead.",
                             keyword
@@ -582,11 +619,11 @@ impl ValidateInstruction for Module {
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         // internal function types, in index order
         let ctx_ref = &ctx;
-        let ft = order_lists(
-            &self.functions,
-            |f| f.ty_index,
-            move |f| ctx_ref.get_type(f.ty_index),
-        )?;
+        // let ft = order_lists(
+        //     &self.functions,
+        //     |f| f.ty_index,
+        //     move |f| ctx_ref.get_type(f.ty_index),
+        // )?;
         // Internal table types, in index order
         let tt = &self.tables.iter().map(|t| &t.ty).collect::<Vec<_>>();
         // Internal memory types, in index order
@@ -597,9 +634,9 @@ impl ValidateInstruction for Module {
         // let rt = self.ref
 
         // validate types are equal
-        if ctx.types() != &self.types {
-            return Err(ValidationError::new());
-        }
+        // if ctx.types() != &self.types {
+        //     return Err(ValidationError::new());
+        // }
         // validate functions are equal
         // let external_functions = ctx.function_exports()
         // let ft_star = ctx.functions();

@@ -134,6 +134,7 @@ impl Options {
 
         match parse(&tokens) {
             Ok(module) => {
+                // we are here! Wahooo
                 todo!()
             }
             Err(err) => {

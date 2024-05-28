@@ -2,11 +2,13 @@ use std::{fmt::Display, iter::Peekable, ops::Deref};
 
 use crate::{
     parse::{
-        ast::{read_u32, Error, Expect, Parse},
-        Keyword, Token,
+        ast::{read_u32, Error, Expect, Parse, TryGet},
+        Keyword, Token, TokenType,
     },
     validation::{Context, Validation, ValidationError},
 };
+
+use super::module::get_id;
 
 /// Type of sign an integer is meant to taken as
 ///
@@ -308,7 +310,7 @@ impl Validation<Limit> for Limit {
 /// They are also used to classify the input and outputs of ["Instructions"].
 ///
 /// Can be represented in rust as (Box<dyn Fn(ResultType) -> ResultType>)
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
 pub struct FunctionType {
     input: ResultType,
     output: ResultType,
@@ -321,15 +323,15 @@ impl FunctionType {
 
     pub fn empty() -> Self {
         Self {
-            input: ResultType(vec![]),
-            output: ResultType(vec![]),
+            input: ResultType { values: vec![] },
+            output: ResultType { values: vec![] },
         }
     }
 
     pub fn anonymous(output: ValueType) -> Self {
         Self {
-            input: ResultType(vec![]),
-            output: ResultType(vec![output]),
+            input: ResultType { values: vec![] },
+            output: ResultType { values: vec![output] },
         }
     }
 
@@ -339,6 +341,10 @@ impl FunctionType {
 
     pub fn input(&self) -> &ResultType {
         &self.input
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.input.is_empty() && self.output.is_empty()
     }
 }
 
@@ -361,27 +367,64 @@ impl Validation<FunctionType> for FunctionType {
 
 /// ["ResultType"] contains the return values from exiting instructions or calling
 /// a function. Its a sequence of values
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ResultType(pub Vec<ValueType>);
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
+pub struct ResultType {
+    values: Vec<ValueType>
+}
 
-impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for ResultType {
-    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
-        let mut tys = vec![];
-        loop {
-            tys.push(ValueType::parse(tokens)?);
-            if let Ok(()) = tokens.peek().copied().expect_right_paren() {
-                break;
-            }
-        }
-        return Ok(ResultType(tys));
+impl ResultType {
+    pub fn new(values: Vec<ValueType>) -> Self {
+        Self { values }
+    }
+    
+    pub fn values(&self) -> &[ValueType] {
+        &self.values
+    }
+
+    pub fn take(self) -> Vec<ValueType> {
+        self.values
+    }
+
+    pub fn extend(&mut self, list: Vec<ValueType>) {
+        self.values.extend(list);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
     }
 }
 
-impl Deref for ResultType {
-    type Target = Vec<ValueType>;
+pub struct FuncParam(pub Vec<ValueType>);
+impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for FuncParam {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::Param)?;
+        let values= match get_id(tokens) {
+            Some(_) => vec![ValueType::parse(tokens)?],
+            None => {
+                let mut tys = vec![];
+                while !tokens.peek().copied().expect_right_paren().is_ok() {
+                    tys.push(ValueType::parse(tokens)?);
+                }
+                tys
+            }
+        };
+        tokens.next().expect_right_paren()?;
+        return Ok(FuncParam(values));
+    }
+}
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
+pub struct FuncResult(pub Vec<ValueType>);
+impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for FuncResult {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::Result)?;
+        let mut values = vec![];
+        while !tokens.peek().copied().expect_right_paren().is_ok() {
+            values.push(ValueType::parse(tokens)?);
+        }
+        tokens.next().expect_right_paren()?;
+        return Ok(FuncResult(values));
     }
 }
 
@@ -766,3 +809,131 @@ impl Display for NumType {
         write!(f, "{}", content)
     }
 }
+
+pub struct RelativeExport {
+    pub name: String
+}
+
+impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for RelativeExport {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::Export)?;
+        let name = tokens.next().expect_string()?;
+        tokens.next().expect_right_paren()?;
+        Ok(RelativeExport {
+            name
+        })
+    }
+}
+
+pub struct RelativeImport {
+    module: String,
+    name: String
+}
+
+impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for RelativeImport {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::Import)?;
+        let module = tokens.next().expect_string()?;
+        let name = tokens.next().expect_string()?;
+        tokens.next().expect_right_paren()?;
+        Ok(RelativeImport {
+            module, name
+        })
+    }
+}
+
+pub struct FuncType {
+    id: Option<String>,
+    params: Vec<ValueType>,
+    result: Vec<ValueType>, 
+}
+
+impl FuncType {
+    pub fn into_parts(self) -> (Option<String>, FunctionType) {
+        let params = ResultType::new(self.params);
+        let results = ResultType::new(self.result);
+        (self.id, FunctionType::new(params, results))
+    }
+}
+
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for FuncType {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::Type)?;
+        let id = get_id(tokens);
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::Func)?;
+        
+        let mut params = vec![];
+        let mut result = vec![];
+
+        if tokens.peek().copied().try_right_paran().is_some() {
+            tokens.next().expect_right_paren()?;
+            return Ok(FuncType { id, params, result })
+        }
+
+        loop {
+            tokens.peek().copied().expect_left_paren()?;
+            match tokens.clone().nth(1).expect_keyword()? {
+                Keyword::Param => params.extend(FuncParam::parse(tokens)?.0),
+                Keyword::Result => result.extend(FuncResult::parse(tokens)?.0),
+                _ => break,
+            }
+            if tokens.peek().copied().try_right_paran().is_some() {
+                break
+            }
+        }
+
+        tokens.next().expect_right_paren()?;
+        Ok(FuncType { id, params, result })
+    }
+}
+
+pub struct BlockInstruction {
+    id: Option<String>,
+
+    result: Vec<ValueType>
+}
+
+impl BlockInstruction {
+    pub fn empty(id: Option<String>) -> Self {
+        Self::new(id, vec![])
+    }
+
+    pub fn new(id: Option<String>, result: Vec<ValueType>) -> Self {
+        Self { id, result }
+    }
+}
+
+// impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BlockInstruction {
+//     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+//         tokens.next().expect_left_paren()?;
+//         tokens.next().expect_keyword_token(Keyword::Block)?;
+//         let id = get_id(tokens);
+//         if tokens.peek().copied().try_right_paran().is_some() {
+//             return Ok(BlockInstruction::empty(id))
+//         }
+        
+//         // Try and expect the result
+//         tokens.peek().copied().expect_left_paren()?;
+//         let result = match tokens.clone().nth(1).expect_keyword()? {
+//             Keyword::Result => ResultType::parse(tokens)?.take(),
+//             Keyword::Type => Ty
+//             keyword => return Err(Error::new(None, format!("Did not expect '{keyword:?}' when parsing block"))) 
+//         };
+//         let result = if let Ok(_) =  {
+            
+//         } else {
+//             vec![]
+//         };
+//         if tokens.peek().copied().try_right_paran().is_some() {
+//             return Ok(BlockInstruction::new(id, result))
+//         }
+
+//         // 1. 
+
+        
+//     }
+// }

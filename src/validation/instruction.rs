@@ -1130,12 +1130,12 @@ impl ValidateInstruction for BlockOperation {
         // remove the label
         let label = ctx.remove_prepend_label()?;
         // validate the output matches the function output
-        if *ty.output() == label && *ty.output().0 == output {
+        if *ty.output() == label && *ty.output().values() == output {
             // This should never trigger
-            for input_ty in &ty.input().0 {
+            for input_ty in ty.input().values() {
                 let _ = inputs.pop()?.try_into_value_type(input_ty)?;
             }
-            return Ok(ty.output().clone().0);
+            return Ok(ty.output().clone().values().to_vec());
         }
         Err(ValidationError::new())
     }
@@ -1158,12 +1158,12 @@ impl ValidateInstruction for LoopOperation {
         let output = self.instructions.validate(ctx, inputs)?;
         // remove the label
         let label = ctx.remove_prepend_label()?;
-        if *ty.output() == label && *ty.output().0 == output {
+        if *ty.output() == label && *ty.output().values() == output {
             // This should never trigger
-            for input_ty in &ty.input().0 {
+            for input_ty in ty.input().values() {
                 let _ = inputs.pop()?.try_into_value_type(input_ty)?;
             }
-            return Ok(ty.output().clone().0);
+            return Ok(ty.output().clone().values().to_vec());
         }
         Err(ValidationError::new())
     }
@@ -1189,13 +1189,13 @@ impl ValidateInstruction for IfOperation {
         // remove the label
         let label = ctx.remove_prepend_label()?;
         // validate the output matches the functions output
-        if label.0 == o1 && label.0 == o2 && *ty.output().0 == o1 && *ty.output().0 == o2 {
+        if label.values() == o1 && label.values() == o2 && *ty.output().values() == o1 && *ty.output().values() == o2 {
             // validate that the input stack has an i32 and all of of the function types arguments
             let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
-            for input_ty in &ty.input().0 {
+            for input_ty in ty.input().values() {
                 let _ = inputs.pop()?.try_into_value_type(input_ty)?;
             }
-            return Ok(ty.output().clone().0);
+            return Ok(ty.output().clone().values().to_vec());
         }
         Err(ValidationError::new())
     }
@@ -1209,10 +1209,10 @@ impl ValidateInstruction for BrOperation {
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         let ty = ctx.get_label(self.label)?;
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
-        for input_ty in &ty.0 {
+        for input_ty in ty.values() {
             let _ = inputs.pop()?.try_into_value_type(input_ty)?;
         }
-        Ok(ty.0.clone())
+        Ok(ty.values().to_vec())
     }
 }
 
@@ -1224,10 +1224,10 @@ impl ValidateInstruction for BrIfOperation {
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         let ty = ctx.get_label(self.label)?;
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
-        for input_ty in &ty.0 {
+        for input_ty in ty.values() {
             let _ = inputs.pop()?.try_into_value_type(input_ty)?;
         }
-        Ok(ty.0.clone())
+        Ok(ty.values().to_vec())
     }
 }
 
@@ -1248,29 +1248,29 @@ impl ValidateInstruction for BrTableOperation {
         // validate the rest of the labels exist
         for label in self.labels.iter() {
             let ty = ctx.get_label(*label)?;
-            if ty.0.len() != ty_n.0.len() {
+            if ty.values().len() != ty_n.values().len() {
                 return Err(ValidationError::new());
             }
-            for index in ty.0.len()..0 {
+            for index in ty.values().len()..0 {
                 let value = inputs
                     .0
                     .get(index - inputs.0.len())
                     .ok_or_else(ValidationError::new)?;
-                value.try_into_value_type(ty.0.get(index).ok_or_else(ValidationError::new)?)?;
+                value.try_into_value_type(ty.values().get(index).ok_or_else(ValidationError::new)?)?;
             }
         }
         // There must be enough input as expected in `ty_n`
-        if ty_n.0.len() > inputs.0.len() {
+        if ty_n.values().len() > inputs.0.len() {
             return Err(ValidationError::new());
         }
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
-        for index in ty_n.0.len()..0 {
+        for index in ty_n.values().len()..0 {
             let _ = inputs
                 .pop()?
-                .try_into_value_type(ty_n.0.get(index).unwrap())?;
+                .try_into_value_type(ty_n.values().get(index).unwrap())?;
         }
 
-        Ok(ty_n.0.clone())
+        Ok(ty_n.values().to_vec())
     }
 }
 ////////////////////////////////////////////////////////////////////////////////
@@ -1283,10 +1283,10 @@ impl ValidateInstruction for ReturnOperation {
 
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         let ty_set = ctx.returning().ok_or_else(ValidationError::new)?;
-        for ty in &ty_set.0 {
+        for ty in ty_set.values() {
             let _ = inputs.pop()?.try_into_value_type(ty)?;
         }
-        Ok(ty_set.0.clone())
+        Ok(ty_set.values().to_vec())
     }
 }
 
@@ -1299,11 +1299,11 @@ impl ValidateInstruction for CallOperation {
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         let func = ctx.get_function(self.function)?;
         // validate function input arguments
-        for ty in &func.input().0 {
+        for ty in func.input().values() {
             let _ = inputs.pop()?.try_into_value_type(ty)?;
         }
         // if all valid, return output arguments
-        Ok(func.output().0.clone())
+        Ok(func.output().values().to_vec())
     }
 }
 
@@ -1322,9 +1322,9 @@ impl ValidateInstruction for CallIndirectOperation {
         let ty = ctx.get_type(self.ty)?;
         // validate the function
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
-        for input_ty in &ty.input().0 {
+        for input_ty in ty.input().values() {
             let _ = inputs.pop()?.try_into_value_type(input_ty)?;
         }
-        Ok(ty.output().0.clone())
+        Ok(ty.output().values().to_vec())
     }
 }
