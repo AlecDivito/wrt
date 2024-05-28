@@ -1,7 +1,10 @@
-use std::{fs, os::unix::ffi::OsStrExt, path::PathBuf};
+use std::{fs, iter::Peekable, os::unix::ffi::OsStrExt, path::PathBuf};
 
 use clap::{Parser, Subcommand};
-use wrt::parse::{ast::parse, tokenize, Token};
+use wrt::parse::{
+    ast::{parse_module_test, Expect},
+    tokenize, Token,
+};
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -132,37 +135,36 @@ impl Options {
             }
         };
 
-        match parse(&tokens) {
-            Ok(module) => {
-                // we are here! Wahooo
-                todo!()
-            }
-            Err(err) => {
-                let range = if let Some(token) = &err.token() {
-                    if let Some(index) = tokens.iter().position(|t| t == *token) {
-                        if index == 0 {
-                            tokens.get(0..=5).unwrap().to_vec()
+        let mut iter = tokens.iter().peekable();
+        while iter.peek().is_some() {
+            match parse_module_test(&mut iter) {
+                Ok(_) => println!("Passed Test..."),
+                Err(err) => {
+                    let range = if let Some(token) = &err.token() {
+                        if let Some(index) = tokens.iter().position(|t| t == *token) {
+                            if index == 0 {
+                                tokens.get(0..=5).unwrap().to_vec()
+                            } else {
+                                tokens.get(index - 2..=index + 2).unwrap().to_vec()
+                            }
                         } else {
-                            tokens.get(index - 2..=index + 2).unwrap().to_vec()
+                            vec![]
                         }
                     } else {
-                        todo!(
-                            "i don't care about this error, please deal with me {:?}",
-                            token
-                        )
-                    }
-                } else {
-                    vec![]
-                };
+                        vec![]
+                    };
 
-                println!("ERROR");
-                println!("========================================");
-                println!("{:?}", range);
-                let tokens = range.iter().map(|t| t.source()).collect::<Vec<_>>();
-                println!("Tokens around error: {:?}", tokens);
-                println!("Parsing encounted error {:?}", err)
+                    println!("ERROR");
+                    println!("========================================");
+                    println!("{:?}", range);
+                    let tokens = range.iter().map(|t| t.source()).collect::<Vec<_>>();
+                    println!("Tokens around error: {:?}", tokens);
+                    println!("Parsing encounted error {:?}", err);
+                    return Ok(());
+                }
             }
         }
+
         Ok(())
     }
 }

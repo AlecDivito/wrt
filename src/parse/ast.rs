@@ -1,6 +1,9 @@
-use std::iter::Peekable;
+use std::{iter::Peekable, string::ParseError};
 
-use crate::structure::{module::Module, types::SignType};
+use crate::structure::{
+    module::Module,
+    types::{AssertMalformed, SignType},
+};
 
 use super::{Keyword, Token, TokenType};
 
@@ -13,7 +16,22 @@ pub trait Parse<'a, I: Iterator<Item = &'a Token>>: Sized {
 }
 
 #[derive(Debug)]
+pub enum ErrorTy {
+    UnexpectedToken,
+}
+
+impl ToString for ErrorTy {
+    fn to_string(&self) -> String {
+        match self {
+            ErrorTy::UnexpectedToken => "unexpected token",
+        }
+        .to_string()
+    }
+}
+
+#[derive(Debug)]
 pub struct Error {
+    ty: ErrorTy,
     token: Option<Token>,
     error: String,
 }
@@ -21,6 +39,7 @@ pub struct Error {
 impl Error {
     pub fn new(token: Option<Token>, error: impl ToString) -> Self {
         Self {
+            ty: ErrorTy::UnexpectedToken,
             token,
             error: error.to_string(),
         }
@@ -28,6 +47,23 @@ impl Error {
 
     pub fn token(&self) -> Option<&Token> {
         self.token.as_ref()
+    }
+
+    pub fn error(&self) -> &str {
+        &self.error
+    }
+
+    pub fn error_ty(&self) -> String {
+        self.ty.to_string()
+    }
+}
+
+impl Into<Error> for ParseError {
+    fn into(self) -> Error {
+        Error::new(
+            None,
+            format!("Failed to parse wat tokens. ERROR: {:?}", self),
+        )
     }
 }
 
@@ -60,10 +96,7 @@ impl<'a> IntoResult<&'a Token> for Option<&'a Token> {
         if let Some(token) = self {
             Ok(token)
         } else {
-            Err(Error {
-                token: None,
-                error: "Expected token".to_string(),
-            })
+            Err(Error::new(None, "Expected token"))
         }
     }
 }
@@ -93,10 +126,7 @@ impl<'a> Expect<'a> for Option<&'a Token> {
                 return Ok(());
             }
         }
-        Err(Error {
-            token: self.map(Clone::clone),
-            error: "Expected left paren".to_string(),
-        })
+        Err(Error::new(self.map(Clone::clone), "Expected left paren"))
     }
 
     fn expect_right_paren(&self) -> Result<(), Error> {
@@ -105,10 +135,7 @@ impl<'a> Expect<'a> for Option<&'a Token> {
                 return Ok(());
             }
         }
-        Err(Error {
-            token: self.map(Clone::clone),
-            error: "Expected right paren".to_string(),
-        })
+        Err(Error::new(self.map(Clone::clone), "Expected right paren"))
     }
 
     fn expect_number(&self) -> Result<&'a Token, Error> {
@@ -117,10 +144,7 @@ impl<'a> Expect<'a> for Option<&'a Token> {
                 return Ok(token);
             }
         }
-        Err(Error {
-            token: self.map(Clone::clone),
-            error: "Expected number".to_string(),
-        })
+        Err(Error::new(self.map(Clone::clone), "Expected number"))
     }
 
     fn expect_keyword_token(&self, ty: Keyword) -> Result<(), Error> {
@@ -128,10 +152,10 @@ impl<'a> Expect<'a> for Option<&'a Token> {
         if keyword == ty {
             Ok(())
         } else {
-            Err(Error {
-                token: self.map(Clone::clone),
-                error: format!("Expected keyword {:?}", ty),
-            })
+            Err(Error::new(
+                self.map(Clone::clone),
+                format!("Expected keyword {:?}", ty),
+            ))
         }
     }
 
@@ -141,10 +165,7 @@ impl<'a> Expect<'a> for Option<&'a Token> {
                 return Ok(token.source.clone());
             }
         }
-        Err(Error {
-            token: self.map(Clone::clone),
-            error: "Expected string".to_string(),
-        })
+        Err(Error::new(self.map(Clone::clone), "Expected string"))
     }
 
     fn expect_keyword(&self) -> Result<Keyword, Error> {
@@ -153,10 +174,7 @@ impl<'a> Expect<'a> for Option<&'a Token> {
                 return Ok(key.clone());
             }
         }
-        Err(Error {
-            token: self.map(Clone::clone),
-            error: "Expected keyword".to_string(),
-        })
+        Err(Error::new(self.map(Clone::clone), "Expected keyword"))
     }
 }
 
@@ -195,7 +213,19 @@ pub fn read_u64(token: &Token) -> Result<u64, Error> {
     Ok(number)
 }
 
-pub fn parse(tokens: &[Token]) -> Result<Module, Error> {
-    let mut iter = tokens.iter().peekable();
-    Module::parse(&mut iter)
+pub fn parse_module_test<'a, I: Iterator<Item = &'a Token> + Clone>(
+    tokens: &mut Peekable<I>,
+) -> Result<(), Error> {
+    let mut peek_iter = tokens.clone();
+    let _ = peek_iter.next().expect_left_paren()?;
+    let keyword = peek_iter.next().expect_keyword()?;
+
+    match keyword {
+        Keyword::Module => Module::parse(tokens).map(|_| ()),
+        Keyword::AssertMalformed => AssertMalformed::parse(tokens)?.test(),
+        _ => Err(Error::new(
+            None,
+            format!("{keyword:?} was not expected as a top level directive in .wast files"),
+        )),
+    }
 }

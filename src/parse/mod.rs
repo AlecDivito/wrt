@@ -2,6 +2,8 @@ pub mod ast;
 
 use std::{iter::Peekable, str::FromStr};
 
+use ast::Error;
+
 use crate::structure::types::{
     Direction, FloatType, FloatVectorShape, HalfType, IntType, IntegerVectorShape, MemoryWidth,
     MemoryZeroWidth, NumType, SignType, VectorShape,
@@ -21,6 +23,13 @@ pub struct ParseError {
     pub error: String,
     tokens: Option<Vec<Token>>,
 }
+
+impl From<ParseError> for Error {
+    fn from(value: ParseError) -> Self {
+        ParseError::into(value)
+    }
+}
+
 impl ParseError {
     pub fn new(str: impl Into<String>) -> Self {
         Self {

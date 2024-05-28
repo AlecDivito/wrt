@@ -3,12 +3,12 @@ use std::{fmt::Display, iter::Peekable, ops::Deref};
 use crate::{
     parse::{
         ast::{read_u32, Error, Expect, Parse, TryGet},
-        Keyword, Token, TokenType,
+        tokenize, Keyword, Token, TokenType,
     },
     validation::{Context, Validation, ValidationError},
 };
 
-use super::module::get_id;
+use super::module::{get_id, Module};
 
 /// Type of sign an integer is meant to taken as
 ///
@@ -331,7 +331,9 @@ impl FunctionType {
     pub fn anonymous(output: ValueType) -> Self {
         Self {
             input: ResultType { values: vec![] },
-            output: ResultType { values: vec![output] },
+            output: ResultType {
+                values: vec![output],
+            },
         }
     }
 
@@ -369,14 +371,14 @@ impl Validation<FunctionType> for FunctionType {
 /// a function. Its a sequence of values
 #[derive(Default, Clone, Debug, PartialEq, Eq)]
 pub struct ResultType {
-    values: Vec<ValueType>
+    values: Vec<ValueType>,
 }
 
 impl ResultType {
     pub fn new(values: Vec<ValueType>) -> Self {
         Self { values }
     }
-    
+
     pub fn values(&self) -> &[ValueType] {
         &self.values
     }
@@ -399,7 +401,7 @@ impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for FuncParam {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
         tokens.next().expect_left_paren()?;
         tokens.next().expect_keyword_token(Keyword::Param)?;
-        let values= match get_id(tokens) {
+        let values = match get_id(tokens) {
             Some(_) => vec![ValueType::parse(tokens)?],
             None => {
                 let mut tys = vec![];
@@ -811,7 +813,7 @@ impl Display for NumType {
 }
 
 pub struct RelativeExport {
-    pub name: String
+    pub name: String,
 }
 
 impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for RelativeExport {
@@ -820,15 +822,13 @@ impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for RelativeExport {
         tokens.next().expect_keyword_token(Keyword::Export)?;
         let name = tokens.next().expect_string()?;
         tokens.next().expect_right_paren()?;
-        Ok(RelativeExport {
-            name
-        })
+        Ok(RelativeExport { name })
     }
 }
 
 pub struct RelativeImport {
     module: String,
-    name: String
+    name: String,
 }
 
 impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for RelativeImport {
@@ -838,16 +838,14 @@ impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for RelativeImport {
         let module = tokens.next().expect_string()?;
         let name = tokens.next().expect_string()?;
         tokens.next().expect_right_paren()?;
-        Ok(RelativeImport {
-            module, name
-        })
+        Ok(RelativeImport { module, name })
     }
 }
 
 pub struct FuncType {
     id: Option<String>,
     params: Vec<ValueType>,
-    result: Vec<ValueType>, 
+    result: Vec<ValueType>,
 }
 
 impl FuncType {
@@ -865,24 +863,24 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for FuncType {
         let id = get_id(tokens);
         tokens.next().expect_left_paren()?;
         tokens.next().expect_keyword_token(Keyword::Func)?;
-        
+
         let mut params = vec![];
         let mut result = vec![];
 
         if tokens.peek().copied().try_right_paran().is_some() {
             tokens.next().expect_right_paren()?;
-            return Ok(FuncType { id, params, result })
+            return Ok(FuncType { id, params, result });
         }
 
         loop {
             tokens.peek().copied().expect_left_paren()?;
             match tokens.clone().nth(1).expect_keyword()? {
-                Keyword::Param => params.extend(FuncParam::parse(tokens)?.0),
+                Keyword::Param if result.is_empty() => params.extend(FuncParam::parse(tokens)?.0),
                 Keyword::Result => result.extend(FuncResult::parse(tokens)?.0),
                 _ => break,
             }
             if tokens.peek().copied().try_right_paran().is_some() {
-                break
+                break;
             }
         }
 
@@ -894,7 +892,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for FuncType {
 pub struct BlockInstruction {
     id: Option<String>,
 
-    result: Vec<ValueType>
+    result: Vec<ValueType>,
 }
 
 impl BlockInstruction {
@@ -915,16 +913,16 @@ impl BlockInstruction {
 //         if tokens.peek().copied().try_right_paran().is_some() {
 //             return Ok(BlockInstruction::empty(id))
 //         }
-        
+
 //         // Try and expect the result
 //         tokens.peek().copied().expect_left_paren()?;
 //         let result = match tokens.clone().nth(1).expect_keyword()? {
 //             Keyword::Result => ResultType::parse(tokens)?.take(),
 //             Keyword::Type => Ty
-//             keyword => return Err(Error::new(None, format!("Did not expect '{keyword:?}' when parsing block"))) 
+//             keyword => return Err(Error::new(None, format!("Did not expect '{keyword:?}' when parsing block")))
 //         };
 //         let result = if let Ok(_) =  {
-            
+
 //         } else {
 //             vec![]
 //         };
@@ -932,8 +930,56 @@ impl BlockInstruction {
 //             return Ok(BlockInstruction::new(id, result))
 //         }
 
-//         // 1. 
+//         // 1.
 
-        
 //     }
 // }
+
+pub struct AssertMalformed {
+    wat: String,
+    expected_error: String,
+}
+
+impl AssertMalformed {
+    pub fn test(self) -> Result<(), Error> {
+        let module = format!("(module {})", self.wat);
+        let tokens = tokenize(&module)?;
+        let mut iter = tokens.iter().peekable();
+        match Module::parse(&mut iter) {
+            Ok(_) => Err(Error::new(
+                None,
+                "Module compiled successfully when it was expected to fail",
+            )),
+            Err(err) if err.error_ty() == self.expected_error => Ok(()),
+            Err(err) => Err(Error::new(
+                err.token().cloned(),
+                format!(
+                    "Error '{}' != '{}'. Expected '{}'",
+                    self.expected_error,
+                    err.error(),
+                    self.expected_error
+                ),
+            )),
+        }
+    }
+}
+
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for AssertMalformed {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        tokens.next().expect_left_paren()?;
+        tokens
+            .next()
+            .expect_keyword_token(Keyword::AssertMalformed)?;
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::Module)?;
+        tokens.next().expect_keyword_token(Keyword::Quote)?;
+        let wat = tokens.next().expect_string()?;
+        tokens.next().expect_right_paren()?;
+        let expected_error = tokens.next().expect_string()?;
+        tokens.next().expect_right_paren()?;
+        Ok(Self {
+            wat,
+            expected_error,
+        })
+    }
+}
