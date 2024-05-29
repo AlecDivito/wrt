@@ -2,7 +2,7 @@ use std::{fs, iter::Peekable, os::unix::ffi::OsStrExt, path::PathBuf};
 
 use clap::{Parser, Subcommand};
 use wrt::parse::{
-    ast::{parse_module_test, Expect},
+    ast::{parse_module_test, parse_module_test_2, print_tee, Expect},
     tokenize, Token,
 };
 
@@ -136,34 +136,37 @@ impl Options {
         };
 
         let mut iter = tokens.iter().peekable();
-        while iter.peek().is_some() {
-            match parse_module_test(&mut iter) {
-                Ok(_) => println!("Passed Test..."),
-                Err(err) => {
-                    let range = if let Some(token) = &err.token() {
-                        if let Some(index) = tokens.iter().position(|t| t == *token) {
-                            if index == 0 {
-                                tokens.get(0..=5).unwrap().to_vec()
-                            } else {
-                                tokens.get(index - 2..=index + 2).unwrap().to_vec()
-                            }
-                        } else {
-                            vec![]
-                        }
-                    } else {
-                        vec![]
-                    };
+        let tee = parse_module_test_2(&mut iter).unwrap();
+        // print!("{:?}", tee);
+        print_tee(tee);
+        // while iter.peek().is_some() {
+        //     match parse_module_test(&mut iter) {
+        //         Ok(_) => println!("Passed Test..."),
+        //         Err(err) => {
+        //             let range = if let Some(token) = &err.token() {
+        //                 if let Some(index) = tokens.iter().position(|t| t == *token) {
+        //                     if index == 0 {
+        //                         tokens.get(0..=5).unwrap().to_vec()
+        //                     } else {
+        //                         tokens.get(index - 2..=index + 2).unwrap().to_vec()
+        //                     }
+        //                 } else {
+        //                     vec![]
+        //                 }
+        //             } else {
+        //                 vec![]
+        //             };
 
-                    println!("ERROR");
-                    println!("========================================");
-                    println!("{:?}", range);
-                    let tokens = range.iter().map(|t| t.source()).collect::<Vec<_>>();
-                    println!("Tokens around error: {:?}", tokens);
-                    println!("Parsing encounted error {:?}", err);
-                    return Ok(());
-                }
-            }
-        }
+        //             println!("ERROR");
+        //             println!("========================================");
+        //             println!("{:?}", range);
+        //             let tokens = range.iter().map(|t| t.source()).collect::<Vec<_>>();
+        //             println!("Tokens around error: {:?}", tokens);
+        //             println!("Parsing encounted error {:?}", err);
+        //             return Ok(());
+        //         }
+        //     }
+        // }
 
         Ok(())
     }

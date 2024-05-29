@@ -1,8 +1,11 @@
-use std::{iter::Peekable, string::ParseError};
+use std::{convert::TryInto, iter::Peekable, string::ParseError};
 
-use crate::structure::{
-    module::Module,
-    types::{AssertMalformed, SignType},
+use crate::{
+    execution::Number,
+    structure::{
+        module::Module,
+        types::{AssertInvalid, AssertMalformed, NumType, SignType},
+    },
 };
 
 use super::{Keyword, Token, TokenType};
@@ -85,6 +88,8 @@ pub trait TryGet {
     fn try_id(&self) -> Option<String>;
 
     fn try_right_paran(&self) -> Option<()>;
+
+    fn try_left_paran(&self) -> Option<()>;
 }
 
 pub trait IntoResult<T> {
@@ -112,6 +117,14 @@ impl TryGet for Option<&Token> {
 
     fn try_right_paran(&self) -> Option<()> {
         if (*self)?.ty == TokenType::RightParen {
+            Some(())
+        } else {
+            None
+        }
+    }
+
+    fn try_left_paran(&self) -> Option<()> {
+        if (*self)?.ty == TokenType::LeftParen {
             Some(())
         } else {
             None
@@ -187,6 +200,15 @@ impl<'a> Expect<'a> for Option<&'a Token> {
 //    }
 // }
 
+pub fn read_number(expected: NumType, token: &Token) -> Result<Number, Error> {
+    Ok(match expected {
+        NumType::I32 => Number::I32(read_u32(token)?.try_into().unwrap()),
+        NumType::I64 => Number::I64(read_u64(token)?.try_into().unwrap()),
+        NumType::F32 => todo!(),
+        NumType::F64 => todo!(),
+    })
+}
+
 pub fn read_u32(token: &Token) -> Result<u32, Error> {
     let number = if token.source.starts_with("0x") {
         u32::from_str_radix(token.source.trim_start_matches("0x"), 16)
@@ -223,9 +245,65 @@ pub fn parse_module_test<'a, I: Iterator<Item = &'a Token> + Clone>(
     match keyword {
         Keyword::Module => Module::parse(tokens).map(|_| ()),
         Keyword::AssertMalformed => AssertMalformed::parse(tokens)?.test(),
+        Keyword::AssertInvalid => AssertInvalid::parse(tokens)?.test(),
         _ => Err(Error::new(
-            None,
+            tokens.next().cloned(),
             format!("{keyword:?} was not expected as a top level directive in .wast files"),
         )),
+    }
+}
+
+#[derive(Debug)]
+pub struct Tee {
+    root: Keyword,
+    attributes: Vec<Token>,
+    children: Vec<Tee>,
+}
+
+pub fn parse_module_test_2<'a, I: Iterator<Item = &'a Token> + Clone>(
+    tokens: &mut Peekable<I>,
+) -> Result<Tee, Error> {
+    tokens.next().expect_left_paren()?;
+    let root = tokens.next().expect_keyword()?;
+
+    let mut attributes = vec![];
+    while tokens.peek().copied().try_left_paran().is_none()
+        && tokens.peek().copied().try_right_paran().is_none()
+    {
+        attributes.push(tokens.next().unwrap().clone())
+    }
+
+    let mut children = vec![];
+    while tokens.peek().copied().try_left_paran().is_some() {
+        children.push(parse_module_test_2(tokens)?);
+    }
+
+    tokens.next().expect_right_paren()?;
+
+    Ok(Tee {
+        root,
+        attributes,
+        children,
+    })
+}
+
+pub fn print_tee(tee: Tee) {
+    print_tee_with_indentation(tee, 0);
+}
+
+fn print_tee_with_indentation(tee: Tee, indent: usize) {
+    print!("{}", " ".repeat(indent));
+    print!("({:?}", tee.root);
+    for attr in tee.attributes {
+        print!(" {}", attr.source);
+    }
+    if tee.children.is_empty() {
+        println!(") ");
+    } else {
+        println!();
+        for children in tee.children {
+            print_tee_with_indentation(children, indent + 1)
+        }
+        println!("{})", " ".repeat(indent));
     }
 }

@@ -1,17 +1,18 @@
-use crate::{structure::types::{NumType, SignType}, validation::instruction::Execute};
+use crate::{
+    structure::types::{NumType, SignType},
+    validation::instruction::Execute,
+};
 
 use super::{Number, Stack, Trap};
 
-
-
 pub enum Bool {
     True,
-    False
+    False,
 }
 
 pub enum IntType {
     I32,
-    I64
+    I64,
 }
 
 // Integers are represented as two base unsigned numbers
@@ -27,7 +28,7 @@ impl Execute for Add {
         let result = match (op1, op2) {
             (I32(i1), I32(i2)) => I32((i1 + i2) % 2_i32.pow(32)),
             (I64(i1), I64(i2)) => I64((i1 + i2) % 2_i64.pow(64)),
-            _ => return Err(Trap::new())
+            _ => return Err(Trap::new()),
         };
         stack.push(result);
         Ok(())
@@ -43,7 +44,7 @@ impl Execute for Subtract {
         let result = match (op1, op2) {
             (I32(i1), I32(i2)) => I32((i1 - i2 + 2_i32.pow(32)) % 2_i32.pow(32)),
             (I64(i1), I64(i2)) => I64((i1 - i2 + 2_i64.pow(64)) % 2_i64.pow(64)),
-            _ => return Err(Trap::new())
+            _ => return Err(Trap::new()),
         };
         stack.push(result);
         Ok(())
@@ -59,7 +60,7 @@ impl Execute for Multiply {
         let result = match (op1, op2) {
             (I32(i1), I32(i2)) => I32((i1 * i2) % 2_i32.pow(32)),
             (I64(i1), I64(i2)) => I64((i1 * i2) % 2_i64.pow(64)),
-            _ => return Err(Trap::new())
+            _ => return Err(Trap::new()),
         };
         stack.push(result);
         Ok(())
@@ -78,7 +79,7 @@ impl Execute for Divide {
         let result = match (op1, op2) {
             (I32(i1), I32(i2)) => I32((i1 * i2) % 2_i32.pow(32)),
             (I64(i1), I64(i2)) => I64((i1 * i2) % 2_i64.pow(64)),
-            _ => return Err(Trap::new())
+            _ => return Err(Trap::new()),
         };
         stack.push(result);
         Ok(())

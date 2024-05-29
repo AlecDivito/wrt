@@ -12,13 +12,18 @@ use crate::{
     },
 };
 
-use super::{types::{
-    BlockInstruction, FuncParam, FuncResult, FuncType, FunctionIndex, FunctionType, GlobalIndex, GlobalType, Limit, MemoryIndex, MemoryType, RefType, RelativeExport, RelativeImport, ResultType, TableIndex, TableType, TypeIndex, ValueType
-}, util::IndexedVec};
+use super::{
+    types::{
+        BlockInstruction, FuncParam, FuncResult, FuncType, FunctionIndex, FunctionType,
+        GlobalIndex, GlobalType, Limit, MemoryIndex, MemoryType, RefType, RelativeExport,
+        RelativeImport, ResultType, TableIndex, TableType, TypeIndex, ValueType,
+    },
+    util::IndexedVec,
+};
 
 pub enum FnType {
     Index(TypeIndex),
-    Coded(Box<FunctionType>)
+    Coded(Box<FunctionType>),
 }
 
 /// The definition of a function
@@ -110,9 +115,22 @@ impl ValidateInstruction for Memory {
 
 // Store the type of global. Initialize it by evaluating the globals expression.
 pub struct Global {
+    id: Option<String>,
     ty: GlobalType,
     // Requirement, must be a constant initializer expression.
     init: ConstantExpression,
+}
+
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Global {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::Global)?;
+        let id = get_id(tokens);
+        let ty = GlobalType::parse(tokens)?;
+        let init = ConstantExpression::parse(tokens)?;
+        tokens.next().expect_right_paren()?;
+        Ok(Self { id, ty, init })
+    }
 }
 
 impl ValidateInstruction for Global {
@@ -401,10 +419,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Module {
         loop {
             tokens.peek().copied().expect_left_paren()?;
             match tokens.clone().nth(1).expect_keyword()? {
-                Keyword::Type => {
-                    let (id, ty) = FuncType::parse(tokens)?.into_parts();
-                    this.types.push(id, ty);
-                }
+                Keyword::Type => this.types.push_tuple(FuncType::parse(tokens)?.into_parts()),
                 Keyword::Func => {
                     tokens.next().expect_left_paren()?;
                     tokens.next().expect_keyword_token(Keyword::Func)?;
@@ -427,43 +442,60 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Module {
                         match tokens.clone().nth(1).expect_keyword()? {
                             Keyword::Type => {
                                 if func_ty.is_some() {
-                                    return Err(Error::new(
-                                        None,
-                                        "multiple 'type' blocks on func",
-                                    ))
+                                    return Err(Error::new(None, "multiple 'type' blocks on func"));
                                 }
                                 let (id, ty) = FuncType::parse(tokens)?.into_parts();
                                 match id {
                                     Some(id) if ty.is_empty() => {
-                                        func_ty = Some(this.types.get(&id).ok_or_else(|| Error::new(None, format!("func type id {id} does not exist")))?);
-                                    },
-                                    Some(id) => return Err(Error::new(None, format!("func type id {id} defines types. thats not allowed"))),
-                                    None => return Err(Error::new(None, "func type was not associated with any id"))
+                                        func_ty = Some(this.types.get(&id).ok_or_else(|| {
+                                            Error::new(
+                                                None,
+                                                format!("func type id {id} does not exist"),
+                                            )
+                                        })?);
+                                    }
+                                    Some(id) => {
+                                        return Err(Error::new(
+                                            None,
+                                            format!(
+                                            "func type id {id} defines types. thats not allowed"
+                                        ),
+                                        ))
+                                    }
+                                    None => {
+                                        return Err(Error::new(
+                                            None,
+                                            "func type was not associated with any id",
+                                        ))
+                                    }
                                 }
-                            },
-                            Keyword::Export => {
-                                match &export {
-                                    Some(_) => return Err(Error::new(
+                            }
+                            Keyword::Export => match &export {
+                                Some(_) => {
+                                    return Err(Error::new(
                                         None,
                                         "multiple 'export' blocks on func",
-                                    )),
-                                    None => {export = Some(RelativeExport::parse(tokens)?);}
+                                    ))
                                 }
-                            }
-                            Keyword::Import => {
-                                match &import {
-                                    Some(_) => return Err(Error::new(
+                                None => {
+                                    export = Some(RelativeExport::parse(tokens)?);
+                                }
+                            },
+                            Keyword::Import => match &import {
+                                Some(_) => {
+                                    return Err(Error::new(
                                         None,
                                         "multiple 'import' blocks on func",
-                                    )),
-                                    None => {import = Some(RelativeImport::parse(tokens)?);}
+                                    ))
                                 }
-                            }
+                                None => {
+                                    import = Some(RelativeImport::parse(tokens)?);
+                                }
+                            },
                             Keyword::Param => params.extend(FuncParam::parse(tokens)?.0),
                             Keyword::Result => result.extend(FuncResult::parse(tokens)?.0),
                             _ => break,
                         }
-                        
                     }
                     // Get all locals
                     loop {
@@ -513,17 +545,29 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Module {
                     // Function loop completed. Add everything parsed to the module
                     let ty = match func_ty {
                         Some(ty) if params.is_empty() && result.is_empty() => ty.clone(),
-                        Some(ty) if ty.input().values() == params.values() && ty.output().values() == result.values() => ty.clone(),
+                        Some(ty)
+                            if ty.input().values() == params.values()
+                                && ty.output().values() == result.values() =>
+                        {
+                            ty.clone()
+                        }
                         None => FunctionType::new(params, result),
-                        Some(ty) => return Err(Error::new(None, "function type and parameters do not match"))
+                        Some(ty) => {
+                            return Err(Error::new(
+                                None,
+                                "function type and parameters do not match",
+                            ))
+                        }
                     };
-
-
 
                     let expression = Expression::new(instructions);
                     // this.types.push(None, FunctionType::new(params, result));
                     // let ty_index = (this.types.len() - 1).try_into().unwrap();
-                    this.functions.push(Function::new(FnType::Coded(Box::new(ty)), locals, expression));
+                    this.functions.push(Function::new(
+                        FnType::Coded(Box::new(ty)),
+                        locals,
+                        expression,
+                    ));
                     if let Some(name) = export {
                         let index = (this.functions.len() - 1).try_into().unwrap();
                         this.export
@@ -536,12 +580,8 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Module {
                     let id = get_id(tokens);
                 }
                 Keyword::Memory => {
-                    tokens.next().expect_left_paren()?;
-                    tokens.next().expect_keyword_token(Keyword::Memory)?;
-                    let id = get_id(tokens);
-                    let limit = Limit::parse(tokens)?;
-                    this.memories.push(Memory::new(id, limit));
-                }
+                    todo!()
+                } // this.memories.push(Memory::parse(tokens)?),
                 Keyword::Global => {
                     tokens.next().expect_left_paren()?;
                     tokens.next().expect_keyword_token(Keyword::Global)?;
@@ -578,9 +618,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Module {
                     ));
                 }
             }
-            tokens.next().expect_right_paren()?;
-            // check if closing
-            if let Ok(()) = tokens.peek().copied().expect_right_paren() {
+            if tokens.peek().copied().try_right_paran().is_some() {
                 break;
             }
         }
@@ -684,8 +722,11 @@ impl ValidateInstruction for Module {
         }
 
         // Memory must not be larger then 1 (can we change this?)
-        if ctx.memories().len() > 1 {
-            return Err(ValidationError::new());
+        if self.memories.len() > 1 {
+            return Err(ValidationError::multiple_memory(format!(
+                "Found {} memories. There should only exist 1",
+                self.memories.len()
+            )));
         }
 
         // All export names must be unique

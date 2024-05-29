@@ -41,10 +41,19 @@
 
 pub mod instruction;
 
-use std::convert::TryFrom;
+use std::{convert::TryFrom, iter::Peekable};
 
-use crate::structure::types::{
-    FunctionIndex, FunctionType, GlobalType, MemoryType, RefType, ResultType, TableType, ValueType,
+use instruction::Const;
+
+use crate::{
+    parse::{
+        ast::{read_number, Error, ErrorTy, Expect, Parse},
+        Keyword, Token,
+    },
+    structure::types::{
+        FunctionIndex, FunctionType, GlobalType, MemoryType, NumType, RefType, ResultType,
+        TableType, ValueType,
+    },
 };
 
 /// Representation of the validation context of a [Data] segment inside of a
@@ -58,7 +67,7 @@ impl Ok {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Context {
     types: Vec<FunctionType>,
     functions: Vec<FunctionType>,
@@ -213,11 +222,48 @@ pub trait Validation<Extra> {
     fn validate(&self, ctx: &Context, args: Extra) -> Result<(), ValidationError>;
 }
 
-pub struct ValidationError {}
+pub enum ValidationErrorTy {
+    MultipleMemories,
+}
+
+impl ToString for ValidationErrorTy {
+    fn to_string(&self) -> String {
+        match self {
+            Self::MultipleMemories => "multiple memories",
+        }
+        .to_string()
+    }
+}
+
+pub struct ValidationError {
+    error: Option<String>,
+    ty: Option<ValidationErrorTy>,
+}
 
 impl ValidationError {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            error: None,
+            ty: None,
+        }
+    }
+
+    pub fn multiple_memory(e: impl ToString) -> Self {
+        Self {
+            error: Some(e.to_string()),
+            ty: Some(ValidationErrorTy::MultipleMemories),
+        }
+    }
+
+    pub fn error(&self) -> String {
+        self.error.clone().unwrap_or_default()
+    }
+
+    pub fn error_ty(&self) -> String {
+        self.ty
+            .as_ref()
+            .map(ValidationErrorTy::to_string)
+            .unwrap_or_default()
     }
 }
 
@@ -226,6 +272,9 @@ pub type ValidateResult<T> = Result<T, ValidationError>;
 pub struct Input(pub Vec<ValueType>);
 
 impl Input {
+    pub fn new() -> Self {
+        Self(vec![])
+    }
     pub fn pop(&mut self) -> ValidateResult<ValueType> {
         self.0.pop().ok_or_else(ValidationError::new)
     }
@@ -291,6 +340,25 @@ pub struct ConstantExpression {
     instructions: Vec<Box<dyn ValidateInstruction>>,
 }
 
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for ConstantExpression {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        tokens.next().expect_left_paren()?;
+        match tokens.next().expect_keyword()? {
+            Keyword::Const(ty) => {
+                let number = read_number(ty, tokens.next().expect_number()?)?;
+                tokens.next().expect_right_paren()?;
+                Ok(ConstantExpression {
+                    instructions: vec![Box::new(Const::new(ty, number))],
+                })
+            }
+            key => Err(Error::new(
+                None,
+                format!("Expected constant expression. Found {:?}", key),
+            )),
+        }
+    }
+}
+
 impl ValidateInstruction for ConstantExpression {
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         for index in 0..self.instructions.len() {
@@ -308,3 +376,240 @@ impl ValidateInstruction for ConstantExpression {
         Err(ValidationError::new())
     }
 }
+
+// pub struct Expr {
+
+// }
+
+// impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Expr {
+//     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+//         tokens.next().expect_left_paren()?;
+//         match tokens.next().expect_keyword()? {
+//             Keyword::LocalGet => todo!(),
+//             Keyword::LocalSet => todo!(),
+//             Keyword::LocalTee => todo!(),
+//             Keyword::GlobalGet => todo!(),
+//             Keyword::GlobalSet => todo!(),
+//             Keyword::TableGet => todo!(),
+//             Keyword::TableSet => todo!(),
+//             Keyword::TableSize => todo!(),
+//             Keyword::TableGrow => todo!(),
+//             Keyword::TableFill => todo!(),
+//             Keyword::TableCopy => todo!(),
+//             Keyword::TableInit => todo!(),
+//             Keyword::ElemDrop => todo!(),
+//             Keyword::MemorySize => todo!(),
+//             Keyword::MemoryGrow => todo!(),
+//             Keyword::MemoryFill => todo!(),
+//             Keyword::MemoryCopy => todo!(),
+//             Keyword::MemoryInit => todo!(),
+//             Keyword::DataDrop => todo!(),
+//             Keyword::Load(_) => todo!(),
+//             Keyword::Store(_) => todo!(),
+//             Keyword::I32Load8(_) => todo!(),
+//             Keyword::I32Load16(_) => todo!(),
+//             Keyword::I64Load8(_) => todo!(),
+//             Keyword::I64Load16(_) => todo!(),
+//             Keyword::I64Load32(_) => todo!(),
+//             Keyword::I32Store8 => todo!(),
+//             Keyword::I32Store16 => todo!(),
+//             Keyword::I64Store8 => todo!(),
+//             Keyword::I64Store16 => todo!(),
+//             Keyword::I64Store32 => todo!(),
+//             Keyword::MemArgsAlign(_) => todo!(),
+//             Keyword::MemArgsOffset(_) => todo!(),
+//             Keyword::Type => todo!(),
+//             Keyword::Func => todo!(),
+//             Keyword::Param => todo!(),
+//             Keyword::Result => todo!(),
+//             Keyword::Start => todo!(),
+//             Keyword::Local => todo!(),
+//             Keyword::Global => todo!(),
+//             Keyword::Table => todo!(),
+//             Keyword::Memory => todo!(),
+//             Keyword::Elem => todo!(),
+//             Keyword::Data => todo!(),
+//             Keyword::Declare => todo!(),
+//             Keyword::Offset => todo!(),
+//             Keyword::Item => todo!(),
+//             Keyword::Import => todo!(),
+//             Keyword::Export => todo!(),
+//             Keyword::V128Load => todo!(),
+//             Keyword::V128Store => todo!(),
+//             Keyword::VecLoad8x8(_) => todo!(),
+//             Keyword::VecLoad16x4(_) => todo!(),
+//             Keyword::VecLoad32x2(_) => todo!(),
+//             Keyword::VecLoadSplat(_) => todo!(),
+//             Keyword::VecLoadZero(_) => todo!(),
+//             Keyword::VecLoadLane(_) => todo!(),
+//             Keyword::VecStoreLane(_) => todo!(),
+//             Keyword::Const(_) => todo!(),
+//             Keyword::ConstV128 => todo!(),
+//             Keyword::RefNull => todo!(),
+//             Keyword::RefFunc => todo!(),
+//             Keyword::RefExtern => todo!(),
+//             Keyword::RefIsNull => todo!(),
+//             Keyword::IntClz(_) => todo!(),
+//             Keyword::IntCtz(_) => todo!(),
+//             Keyword::IntPopCnt(_) => todo!(),
+//             Keyword::IntExtend8Signed(_) => todo!(),
+//             Keyword::IntExtend16Signed(_) => todo!(),
+//             Keyword::I64Extend32Signed => todo!(),
+//             Keyword::NegativeFloat(_) => todo!(),
+//             Keyword::AbsoluteFloat(_) => todo!(),
+//             Keyword::SquareRootFloat(_) => todo!(),
+//             Keyword::CeilFloat(_) => todo!(),
+//             Keyword::FloorFLoat(_) => todo!(),
+//             Keyword::TruncateFloat(_) => todo!(),
+//             Keyword::NearestFloat(_) => todo!(),
+//             Keyword::AddInt(_) => todo!(),
+//             Keyword::SubInt(_) => todo!(),
+//             Keyword::MultiplyInt(_) => todo!(),
+//             Keyword::AndInt(_) => todo!(),
+//             Keyword::OrInt(_) => todo!(),
+//             Keyword::XORInt(_) => todo!(),
+//             Keyword::ShiftLeftInt(_) => todo!(),
+//             Keyword::DivideInt { shape, sign } => todo!(),
+//             Keyword::RemainderInt { shape, sign } => todo!(),
+//             Keyword::ShiftRightInt { shape, sign } => todo!(),
+//             Keyword::RotateInt { shape, direction } => todo!(),
+//             Keyword::AddFloat(_) => todo!(),
+//             Keyword::SubFloat(_) => todo!(),
+//             Keyword::MultiplyFloat(_) => todo!(),
+//             Keyword::DivideFloat(_) => todo!(),
+//             Keyword::MinFloat(_) => todo!(),
+//             Keyword::MaxFloat(_) => todo!(),
+//             Keyword::CopySign(_) => todo!(),
+//             Keyword::I32EqualTest => todo!(),
+//             Keyword::I64EqualTest => todo!(),
+//             Keyword::CompareIntEqual(_) => todo!(),
+//             Keyword::CompareIntNotEqual(_) => todo!(),
+//             Keyword::CompareIntLessThen { shape, sign } => todo!(),
+//             Keyword::CompareIntLessOrEqual { shape, sign } => todo!(),
+//             Keyword::CompareIntGreaterThen { shape, sign } => todo!(),
+//             Keyword::CompareIntGreaterOrEqual { shape, sign } => todo!(),
+//             Keyword::CompareFloatEqual(_) => todo!(),
+//             Keyword::CompareFloatNotEqual(_) => todo!(),
+//             Keyword::CompareFloatLessThen(_) => todo!(),
+//             Keyword::CompareFloatLessOrEqual(_) => todo!(),
+//             Keyword::CompareFloatGreaterThen(_) => todo!(),
+//             Keyword::CompareFloatGreaterOrEqual(_) => todo!(),
+//             Keyword::I32WrapI64 => todo!(),
+//             Keyword::I64ExtendI32(_) => todo!(),
+//             Keyword::F32DemoteF64 => todo!(),
+//             Keyword::F64PromoteF32 => todo!(),
+//             Keyword::I32TruncateF32(_) => todo!(),
+//             Keyword::I64TruncateF32(_) => todo!(),
+//             Keyword::I32TruncateF64(_) => todo!(),
+//             Keyword::I64TruncateF64(_) => todo!(),
+//             Keyword::I32TruncateSatF32(_) => todo!(),
+//             Keyword::I64TruncateSatF32(_) => todo!(),
+//             Keyword::I32TruncateSatF64(_) => todo!(),
+//             Keyword::I64TruncateSatF64(_) => todo!(),
+//             Keyword::F32ConvertI32(_) => todo!(),
+//             Keyword::F32ConvertI64(_) => todo!(),
+//             Keyword::F64ConvertI32(_) => todo!(),
+//             Keyword::F64ConvertI64(_) => todo!(),
+//             Keyword::F32ReinterpretI32 => todo!(),
+//             Keyword::F64ReinterpretI64 => todo!(),
+//             Keyword::I32ReinterpretI32 => todo!(),
+//             Keyword::I64ReinterpretI64 => todo!(),
+//             Keyword::V128Not => todo!(),
+//             Keyword::V128And => todo!(),
+//             Keyword::V128AndNot => todo!(),
+//             Keyword::V128Or => todo!(),
+//             Keyword::V128XOr => todo!(),
+//             Keyword::V128BitSelect => todo!(),
+//             Keyword::V128AnyTrue => todo!(),
+//             Keyword::VecIntNegative(_) => todo!(),
+//             Keyword::VecIntAbsolute(_) => todo!(),
+//             Keyword::VecI8x16PopCnt => todo!(),
+//             Keyword::VecI8x16AverageUnsigned => todo!(),
+//             Keyword::VecI16x8AverageUnsigned => todo!(),
+//             Keyword::VecFloatNegative(_) => todo!(),
+//             Keyword::VecFloatAbsolute(_) => todo!(),
+//             Keyword::VecFloatSquareRoot(_) => todo!(),
+//             Keyword::VecFloatCeil(_) => todo!(),
+//             Keyword::VecFloatFloor(_) => todo!(),
+//             Keyword::VecFloatTruncate(_) => todo!(),
+//             Keyword::VecFloatNearest(_) => todo!(),
+//             Keyword::I32x4TruncSatF32x4(_) => todo!(),
+//             Keyword::I32x4TruncSatF64x2Zero(_) => todo!(),
+//             Keyword::F64x2PromoteLowF32x4 => todo!(),
+//             Keyword::F32x4PemoteF64x2Zero => todo!(),
+//             Keyword::F32x4ConvertI32x4(_) => todo!(),
+//             Keyword::F64x2ConvertLowI32x4(_) => todo!(),
+//             Keyword::I16x8ExtendAddPairwiseI8x16(_) => todo!(),
+//             Keyword::I32x4ExtaddPairwiseI16x8(_) => todo!(),
+//             Keyword::VecIntEqual(_) => todo!(),
+//             Keyword::VecIntNotEqual(_) => todo!(),
+//             Keyword::VecIntLessThen { shape, sign } => todo!(),
+//             Keyword::VecIntLessOrEqual { shape, sign } => todo!(),
+//             Keyword::VecIntGreaterThen { shape, sign } => todo!(),
+//             Keyword::VecIntGreaterOrEqual { shape, sign } => todo!(),
+//             Keyword::VecEqualFloat(_) => todo!(),
+//             Keyword::VecNotEqualFloat(_) => todo!(),
+//             Keyword::VecLessThenFloat(_) => todo!(),
+//             Keyword::VecLessOrEqualFloat(_) => todo!(),
+//             Keyword::VecGreaterThenFloat(_) => todo!(),
+//             Keyword::VecGreaterOrEqualFloat(_) => todo!(),
+//             Keyword::VecSwizzleFloatI8x16 => todo!(),
+//             Keyword::VecIntAdd(_) => todo!(),
+//             Keyword::VecIntSub(_) => todo!(),
+//             Keyword::VecIntMultiplyI16x8 => todo!(),
+//             Keyword::VecIntMultiplyI32x4 => todo!(),
+//             Keyword::VecIntMultiplyI64x2 => todo!(),
+//             Keyword::VecAddSatI16x8(_) => todo!(),
+//             Keyword::VecSubtractSatI16x8(_) => todo!(),
+//             Keyword::VecI32x4DotProductOfI16x8Signed => todo!(),
+//             Keyword::VecMinInt { shape, sign } => todo!(),
+//             Keyword::VecMaxInt { shape, sign } => todo!(),
+//             Keyword::VecSubFloat(_) => todo!(),
+//             Keyword::VecAddSatI8x16(_) => todo!(),
+//             Keyword::VecSubtractSatI8x16(_) => todo!(),
+//             Keyword::VecAddFloat(_) => todo!(),
+//             Keyword::VecDivFloat(_) => todo!(),
+//             Keyword::VecMulFloat(_) => todo!(),
+//             Keyword::VecMinFloat(_) => todo!(),
+//             Keyword::VecMaxFloat(_) => todo!(),
+//             Keyword::VecPMin(_) => todo!(),
+//             Keyword::VecPMax(_) => todo!(),
+//             Keyword::I16x8Q15mulrSatS => todo!(),
+//             Keyword::I8x16NarrowI16x8(_) => todo!(),
+//             Keyword::I16x8NarrowI32x4(_) => todo!(),
+//             Keyword::I16x8ExtendI8x16 { half, sign } => todo!(),
+//             Keyword::I32x4ExtendI16x8 { half, sign } => todo!(),
+//             Keyword::I64x2ExtendI32x4 { half, sign } => todo!(),
+//             Keyword::I16x8ExtendMultiplyI8x16 { half, sign } => todo!(),
+//             Keyword::I32x4ExtendMultiplyI16x8 { half, sign } => todo!(),
+//             Keyword::I64x2ExtendMultiplyI32x4 { half, sign } => todo!(),
+//             Keyword::VecTest(_) => todo!(),
+//             Keyword::VecBitmask(_) => todo!(),
+//             Keyword::VecShiftLeft(_) => todo!(),
+//             Keyword::VecShiftRight { shape, sign } => todo!(),
+//             Keyword::VecShuffle => todo!(),
+//             Keyword::VecSplat(_) => todo!(),
+//             Keyword::VecExtract { shape, sign } => todo!(),
+//             Keyword::VecReplate(_) => todo!(),
+//             Keyword::Module => todo!(),
+//             Keyword::Bin => todo!(),
+//             Keyword::Quote => todo!(),
+//             Keyword::Script => todo!(),
+//             Keyword::Register => todo!(),
+//             Keyword::Invoke => todo!(),
+//             Keyword::Get => todo!(),
+//             Keyword::AssertMalformed => todo!(),
+//             Keyword::AssertInvalid => todo!(),
+//             Keyword::AssertUnlinkable => todo!(),
+//             Keyword::AssertReturn => todo!(),
+//             Keyword::AssertTrap => todo!(),
+//             Keyword::AssertExhaustion => todo!(),
+//             Keyword::NaNCanonical => todo!(),
+//             Keyword::NaNArithmetic(_) => todo!(),
+//             Keyword::Infinit => todo!(),
+//             Keyword::NaN => todo!(),
+//             Keyword::Input => todo!(),
+//             Keyword::Output => todo!(),
+//         }
+//     }
+// }

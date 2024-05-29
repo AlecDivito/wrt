@@ -45,6 +45,12 @@ pub struct Const {
     ty: NumType,
     value: Number,
 }
+
+impl Const {
+    pub fn new(ty: NumType, value: Number) -> Self {
+        Self { ty, value }
+    }
+}
 impl ValidateInstruction for Const {
     // type Output = [ValueType; 1];
     fn validate(&self, _: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
@@ -1189,7 +1195,11 @@ impl ValidateInstruction for IfOperation {
         // remove the label
         let label = ctx.remove_prepend_label()?;
         // validate the output matches the functions output
-        if label.values() == o1 && label.values() == o2 && *ty.output().values() == o1 && *ty.output().values() == o2 {
+        if label.values() == o1
+            && label.values() == o2
+            && *ty.output().values() == o1
+            && *ty.output().values() == o2
+        {
             // validate that the input stack has an i32 and all of of the function types arguments
             let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
             for input_ty in ty.input().values() {
@@ -1256,7 +1266,9 @@ impl ValidateInstruction for BrTableOperation {
                     .0
                     .get(index - inputs.0.len())
                     .ok_or_else(ValidationError::new)?;
-                value.try_into_value_type(ty.values().get(index).ok_or_else(ValidationError::new)?)?;
+                value.try_into_value_type(
+                    ty.values().get(index).ok_or_else(ValidationError::new)?,
+                )?;
             }
         }
         // There must be enough input as expected in `ty_n`
