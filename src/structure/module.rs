@@ -1,8 +1,8 @@
 use crate::parse::{
-    ast::{Error, Expect, IntoResult, TryGet},
+    ast::{Error, Expect, TryGet},
     Keyword, TokenType,
 };
-use std::{collections::HashSet, convert::TryInto, iter::Peekable, ops::Deref};
+use std::{collections::HashSet, convert::TryInto, iter::Peekable};
 
 use crate::{
     parse::{ast::Parse, Token},
@@ -14,9 +14,9 @@ use crate::{
 
 use super::{
     types::{
-        BlockInstruction, FuncParam, FuncResult, FuncType, FunctionIndex, FunctionType,
-        GlobalIndex, GlobalType, Limit, MemoryIndex, MemoryType, RefType, RelativeExport,
-        RelativeImport, ResultType, TableIndex, TableType, TypeIndex, ValueType,
+        FuncParam, FuncResult, FuncType, FunctionIndex, FunctionType, GlobalIndex, GlobalType,
+        Limit, MemoryIndex, MemoryOpts, MemoryType, RefType, RelativeExport, RelativeImport,
+        ResultType, StartOpts, TableIndex, TableType, TypeIndex, ValueType,
     },
     util::IndexedVec,
 };
@@ -126,8 +126,8 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Global {
         tokens.next().expect_left_paren()?;
         tokens.next().expect_keyword_token(Keyword::Global)?;
         let id = get_id(tokens);
-        let ty = GlobalType::parse(tokens)?;
         let init = ConstantExpression::parse(tokens)?;
+        let ty = GlobalType::parse(tokens)?;
         tokens.next().expect_right_paren()?;
         Ok(Self { id, ty, init })
     }
@@ -251,7 +251,7 @@ impl ValidateInstruction for Data {
 }
 
 #[derive(Clone)]
-pub struct StartFunction(FunctionIndex);
+pub struct StartFunction(u32);
 impl ValidateInstruction for StartFunction {
     fn validate(&self, ctx: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
         let ty = ctx.get_function(self.0)?;
@@ -379,7 +379,7 @@ pub struct Module {
     tables: Vec<Table>,
 
     // Select memory through [MemoryIndex]. Starts at 0. Implicitly reference 0.
-    memories: Vec<Memory>,
+    memories: Vec<MemoryOpts>,
 
     // Referenced through [GlobalIndex]. Start with smallest index not referencing a global import.
     globals: Vec<Global>,
@@ -402,7 +402,7 @@ pub struct Module {
     // and memories have been initialized.
     //
     // NOTE: Intended for use to initialize the state of a module.
-    start: Option<StartFunction>,
+    start: Vec<StartOpts>,
 }
 
 pub fn get_id<'a, I: Iterator<Item = &'a Token>>(iter: &mut Peekable<I>) -> Option<String> {
@@ -579,9 +579,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Module {
                     tokens.next().expect_keyword_token(Keyword::Table)?;
                     let id = get_id(tokens);
                 }
-                Keyword::Memory => {
-                    todo!()
-                } // this.memories.push(Memory::parse(tokens)?),
+                Keyword::Memory => this.memories.push(MemoryOpts::parse(tokens)?),
                 Keyword::Global => {
                     tokens.next().expect_left_paren()?;
                     tokens.next().expect_keyword_token(Keyword::Global)?;
@@ -603,10 +601,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Module {
                     tokens.next().expect_left_paren()?;
                     tokens.next().expect_keyword_token(Keyword::Export)?;
                 }
-                Keyword::Start => {
-                    tokens.next().expect_left_paren()?;
-                    tokens.next().expect_keyword_token(Keyword::Start)?;
-                }
+                Keyword::Start => this.start.push(StartOpts::parse(tokens)?),
                 keyword => {
                     tokens.next().expect_left_paren()?;
                     return Err(Error::new(
@@ -663,11 +658,11 @@ impl ValidateInstruction for Module {
         //     move |f| ctx_ref.get_type(f.ty_index),
         // )?;
         // Internal table types, in index order
-        let tt = &self.tables.iter().map(|t| &t.ty).collect::<Vec<_>>();
+        // let tt = &self.tables.iter().map(|t| &t.ty).collect::<Vec<_>>();
         // Internal memory types, in index order
-        let mt = &self.memories.iter().map(|t| &t.ty).collect::<Vec<_>>();
+        // let mt = &self.memories.iter().map(|t| &t.ty).collect::<Vec<_>>();
         // Internal Global types, in index order
-        let gt = &self.globals.iter().map(|t| &t.ty).collect::<Vec<_>>();
+        // let gt = &self.globals.iter().map(|t| &t.ty).collect::<Vec<_>>();
         // reference types, in index order
         // let rt = self.ref
 
@@ -707,9 +702,9 @@ impl ValidateInstruction for Module {
         }
 
         // If module start exists, it must be valid
-        if let Some(start) = &self.start {
-            start.validate(ctx, inputs)?;
-        }
+        // if let Some(start) = &self.start {
+        //     start.validate(ctx, inputs)?;
+        // }
 
         // Every import must have a valid external type
         for import in &self.imports {

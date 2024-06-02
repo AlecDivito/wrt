@@ -376,6 +376,16 @@ pub enum Keyword {
     Output,
 }
 
+impl Keyword {
+    /// Expect no input parameters and one return type that must be of I32.
+    pub fn has_unary_return_ty_i32(&self) -> bool {
+        match self {
+            Keyword::Const(NumType::I32) => true,
+            _ => false,
+        }
+    }
+}
+
 #[rustfmt::skip]
 impl FromStr for Keyword {
     type Err = ParseError;

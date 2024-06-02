@@ -120,7 +120,8 @@
 // pub mod error;
 // pub mod module;
 // pub mod values;
-pub mod structure;
-pub mod validation;
+pub mod ast;
 pub mod execution;
 pub mod parse;
+pub mod structure;
+pub mod validation;

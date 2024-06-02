@@ -10,10 +10,6 @@ use crate::{
 
 use super::{Keyword, Token, TokenType};
 
-pub struct Ast {}
-
-pub struct Binary {}
-
 pub trait Parse<'a, I: Iterator<Item = &'a Token>>: Sized {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, Error>;
 }
@@ -256,8 +252,9 @@ pub fn parse_module_test<'a, I: Iterator<Item = &'a Token> + Clone>(
 #[derive(Debug)]
 pub struct Tee {
     root: Keyword,
-    attributes: Vec<Token>,
+    left_attributes: Vec<Token>,
     children: Vec<Tee>,
+    right_attributes: Vec<Token>,
 }
 
 pub fn parse_module_test_2<'a, I: Iterator<Item = &'a Token> + Clone>(
@@ -266,11 +263,11 @@ pub fn parse_module_test_2<'a, I: Iterator<Item = &'a Token> + Clone>(
     tokens.next().expect_left_paren()?;
     let root = tokens.next().expect_keyword()?;
 
-    let mut attributes = vec![];
+    let mut left_attributes = vec![];
     while tokens.peek().copied().try_left_paran().is_none()
         && tokens.peek().copied().try_right_paran().is_none()
     {
-        attributes.push(tokens.next().unwrap().clone())
+        left_attributes.push(tokens.next().unwrap().clone())
     }
 
     let mut children = vec![];
@@ -278,32 +275,43 @@ pub fn parse_module_test_2<'a, I: Iterator<Item = &'a Token> + Clone>(
         children.push(parse_module_test_2(tokens)?);
     }
 
+    let mut right_attributes = vec![];
+    while tokens.peek().copied().try_right_paran().is_none() {
+        right_attributes.push(tokens.next().unwrap().clone())
+    }
+
     tokens.next().expect_right_paren()?;
 
     Ok(Tee {
         root,
-        attributes,
+        left_attributes,
         children,
+        right_attributes,
     })
 }
 
-pub fn print_tee(tee: Tee) {
+pub fn print_tee(tee: &Tee) {
     print_tee_with_indentation(tee, 0);
 }
 
-fn print_tee_with_indentation(tee: Tee, indent: usize) {
+fn print_tee_with_indentation(tee: &Tee, indent: usize) {
     print!("{}", " ".repeat(indent));
     print!("({:?}", tee.root);
-    for attr in tee.attributes {
+    for attr in &tee.left_attributes {
+        print!(" {}", attr.source);
+    }
+    if !tee.children.is_empty() {
+        println!();
+        for children in &tee.children {
+            print_tee_with_indentation(children, indent + 1)
+        }
+    }
+    for attr in &tee.right_attributes {
         print!(" {}", attr.source);
     }
     if tee.children.is_empty() {
         println!(") ");
     } else {
-        println!();
-        for children in tee.children {
-            print_tee_with_indentation(children, indent + 1)
-        }
         println!("{})", " ".repeat(indent));
     }
 }

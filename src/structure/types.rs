@@ -1,14 +1,15 @@
-use std::{fmt::Display, iter::Peekable, ops::Deref};
+use std::{fmt::Display, iter::Peekable};
 
 use crate::{
+    ast::Expr,
     parse::{
         ast::{read_u32, Error, Expect, Parse, TryGet},
-        tokenize, Keyword, Token, TokenType,
+        tokenize, Keyword, Token,
     },
     validation::{Context, Input, ValidateInstruction, Validation, ValidationError},
 };
 
-use super::module::{get_id, Data, Memory, Module};
+use super::module::{get_id, Data, Module};
 
 /// Type of sign an integer is meant to taken as
 ///
@@ -52,6 +53,11 @@ impl Validation<FunctionType> for BlockType {
             BlockType::Value(_) => Ok(()),
         }
     }
+}
+
+pub enum Index {
+    Id(String),
+    Index(u32),
 }
 
 pub type TypeIndex = u32;
@@ -903,45 +909,161 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for FuncType {
     }
 }
 
-// pub struct ModuleMemory {
-//     memory: Memory,
-//     import: Option<RelativeImport>,
-//     export: Option<RelativeExport>,
-//     data: Option<Data>,
-// }
+pub struct StartOpts {
+    func_id: Index,
+}
 
-// impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for ModuleMemory {
-//     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
-//         tokens.next().expect_left_paren()?;
-//         tokens.next().expect_keyword_token(Keyword::Memory)?;
-//         let id = get_id(tokens);
-//         // import / export
-//         if tokens.peek().copied().try_left_paran().is_some() {
-//             match tokens.clone().nth(1).expect_keyword()? {
-//                 Keyword::Import => RelativeImport::parse(tokens)?,
-//                 Keyword::Export => RelativeExport::parse(tokens)?,
-//                 Keyword::Data => {
-//                     tokens.next().expect_left_paren()?;
-//                     tokens.next().expect_keyword_token(Keyword::Data)?;
-//                     tokens.next().expect_string()?;
-//                     tokens.next().expect_right_paren()?;
-//                 }
-//                 key => {
-//                     return Err(Error::new(
-//                         tokens.next(),
-//                         format!(
-//                         "Memory inner block only expected 'import', 'export' or 'data'. Got {:?}",
-//                         key
-//                     ),
-//                     ))
-//                 }
-//             }
-//         }
-//         let limit = Limit::parse(tokens)?;
-//         tokens.next().expect_right_paren()?;
-//         Ok(Self::new(id, limit))
-//     }
-// }
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for StartOpts {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::Start)?;
+        let func_id = if let Some(id) = get_id(tokens) {
+            Index::Id(id)
+        } else if let Ok(index) = read_u32(tokens.peek().copied().expect_number()?) {
+            Index::Index(index)
+        } else {
+            return Err(Error::new(
+                tokens.next().cloned(),
+                "'start' block expected index of number or function id.",
+            ));
+        };
+        tokens.next().expect_right_paren()?;
+        Ok(Self { func_id })
+    }
+}
+
+pub struct UseMemory(Index);
+
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for UseMemory {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::Memory)?;
+        let id = if let Some(id) = get_id(tokens) {
+            Index::Id(id)
+        } else if let Ok(index) = read_u32(tokens.peek().copied().expect_number()?) {
+            Index::Index(index)
+        } else {
+            return Err(Error::new(
+                tokens.next().cloned(),
+                "'memory' block expected index of number or memory id.",
+            ));
+        };
+
+        Ok(Self(id))
+    }
+}
+
+pub struct Instruction();
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Instruction {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        todo!("Parse instruction {:?}", tokens.next())
+    }
+}
+
+pub struct OffsetExpr(Instruction);
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for OffsetExpr {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        tokens.next().expect_left_paren()?;
+        let instr = match tokens.next().expect_keyword()? {
+            Keyword::Offset => {
+                tokens.next().expect_left_paren()?;
+                Instruction::parse(tokens)?
+            }
+            key if key.has_unary_return_ty_i32() => Instruction::parse(tokens)?,
+            key => {
+                return Err(Error::new(
+                    tokens.next().cloned(),
+                    format!("'{:?}' keyword not expected in offset block.", key),
+                ))
+            }
+        };
+
+        Ok(Self(instr))
+    }
+}
+
+pub enum DataOpsMode {
+    Passive,
+    Active,
+}
+
+pub struct DataOps {
+    id: Option<String>,
+    data: String,
+    mode: DataOpsMode,
+    memory: UseMemory,
+    offset: Option<OffsetExpr>,
+}
+
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for DataOps {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        let mut this = Self {
+            id: None,
+            data: String::new(),
+            mode: DataOpsMode::Passive,
+            memory: UseMemory(Index::Index(0)),
+            offset: None,
+        };
+
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::Data)?;
+        this.id = get_id(tokens);
+        if tokens.peek().copied().try_left_paran().is_some() {
+            this.memory = UseMemory::parse(tokens)?;
+            this.offset = Some(OffsetExpr::parse(tokens)?);
+            this.mode = DataOpsMode::Active
+        }
+        this.data = tokens.peek().copied().expect_string().unwrap_or_default();
+        tokens.next().expect_right_paren()?;
+
+        Ok(this)
+    }
+}
+
+pub struct MemoryOpts {
+    id: Option<String>,
+    limit: Limit,
+    import: Vec<RelativeImport>,
+    export: Vec<RelativeExport>,
+    data: Vec<DataOps>,
+}
+
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for MemoryOpts {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::Memory)?;
+        let id = get_id(tokens);
+        // import / export
+        let mut import = vec![];
+        let mut export = vec![];
+        let mut data = vec![];
+        if tokens.peek().copied().try_left_paran().is_some() {
+            match tokens.clone().nth(1).expect_keyword()? {
+                Keyword::Import => import.push(RelativeImport::parse(tokens)?),
+                Keyword::Export => export.push(RelativeExport::parse(tokens)?),
+                Keyword::Data => data.push(DataOps::parse(tokens)?),
+                key => {
+                    return Err(Error::new(
+                        tokens.next().cloned(),
+                        format!(
+                        "Memory inner block only expected 'import', 'export' or 'data'. Got {:?}",
+                        key
+                    ),
+                    ))
+                }
+            }
+        }
+        let limit = Limit::parse(tokens)?;
+        tokens.next().expect_right_paren()?;
+        Ok(Self {
+            id,
+            limit,
+            import,
+            export,
+            data,
+        })
+    }
+}
 
 pub struct BlockInstruction {
     id: Option<String>,
