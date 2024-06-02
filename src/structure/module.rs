@@ -1,5 +1,5 @@
 use crate::parse::{
-    ast::{Error, Expect, TryGet},
+    ast::{read_u32, Error, Expect, TryGet},
     Keyword, TokenType,
 };
 use std::{collections::HashSet, convert::TryInto, iter::Peekable};
@@ -14,9 +14,10 @@ use crate::{
 
 use super::{
     types::{
-        FuncParam, FuncResult, FuncType, FunctionIndex, FunctionType, GlobalIndex, GlobalType,
-        Limit, MemoryIndex, MemoryOpts, MemoryType, RefType, RelativeExport, RelativeImport,
-        ResultType, StartOpts, TableIndex, TableType, TypeIndex, ValueType,
+        FuncParam, FuncResult, FuncType, FunctionDefinition, FunctionIndex, FunctionType,
+        GlobalIndex, GlobalType, Index, Limit, MemoryIndex, MemoryOpts, MemoryType, RefType,
+        RelativeExport, RelativeImport, ResultType, StartOpts, TableIndex, TableType, TypeIndex,
+        ValueType,
     },
     util::IndexedVec,
 };
@@ -360,6 +361,29 @@ impl ValidateInstruction for Import {
     }
 }
 
+impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for Import {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::Import)?;
+        let module = tokens.next().expect_string()?;
+        let name = tokens.next().expect_string()?;
+        match get_next_keyword(tokens) {
+            Some(Keyword::Func) => FunctionDefinition::parse(tokens),
+            Some(Keyword::Table) => todo!(),
+            Some(Keyword::Memory) => todo!(),
+            Some(Keyword::Global) => todo!(),
+            value => {
+                return Err(Error::new(
+                    tokens.next().copied(),
+                    format!("Failed to parse Import Description"),
+                ))
+            }
+        }
+        tokens.next().expect_right_paren()?;
+        Ok(Import { module, name })
+    }
+}
+
 #[derive(Default)]
 pub struct IDCtx {
     funcs: Vec<Option<String>>,
@@ -373,7 +397,7 @@ pub struct Module {
     types: IndexedVec<FunctionType>,
 
     // Functions inside of the module
-    functions: Vec<Function>,
+    functions: Vec<FunctionDefinition>,
 
     // Select tables through [TableIndex]. Starts at 0. Implicitly reference 0.
     tables: Vec<Table>,
@@ -410,6 +434,25 @@ pub fn get_id<'a, I: Iterator<Item = &'a Token>>(iter: &mut Peekable<I>) -> Opti
         .map(|token| token.source().to_string())
 }
 
+/// Get an index or fail
+pub fn get_index<'a, I: Iterator<Item = &'a Token>>(
+    tokens: &mut Peekable<I>,
+) -> Result<Index, Error> {
+    match tokens.next_if(|t| t.ty() == &TokenType::Id || t.ty() == &TokenType::Number) {
+        Some(token) if token.ty() == &TokenType::Id => Ok(Index::Id(token.source().to_string())),
+        Some(token) if token.ty() == &TokenType::Number => Ok(Index::Index(read_u32(token)?)),
+        _ => return Err(Error::new(tokens.next().cloned(), "Expected number or id.")),
+    }
+}
+
+pub fn get_next_keyword<'a, I: Iterator<Item = &'a Token> + Clone>(
+    tokens: &mut Peekable<I>,
+) -> Option<Keyword> {
+    tokens.peek().copied().expect_left_paren().ok()?;
+    let keyword = tokens.clone().nth(1).expect_keyword().ok()?;
+    Some(keyword)
+}
+
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Module {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, Error> {
         let mut this = Module::default();
@@ -420,160 +463,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Module {
             tokens.peek().copied().expect_left_paren()?;
             match tokens.clone().nth(1).expect_keyword()? {
                 Keyword::Type => this.types.push_tuple(FuncType::parse(tokens)?.into_parts()),
-                Keyword::Func => {
-                    tokens.next().expect_left_paren()?;
-                    tokens.next().expect_keyword_token(Keyword::Func)?;
-                    this.id_ctx.funcs.push(get_id(tokens));
-                    let mut params = ResultType::new(vec![]);
-                    let mut result = ResultType::new(vec![]);
-                    let mut locals = vec![];
-                    let mut import = None;
-                    let mut export = None;
-                    let mut func_ty = None;
-                    let mut instructions = vec![];
-
-                    // Get the function definition
-                    loop {
-                        if tokens.peek().copied().try_right_paran().is_some() {
-                            break;
-                        }
-
-                        tokens.peek().copied().expect_left_paren()?;
-                        match tokens.clone().nth(1).expect_keyword()? {
-                            Keyword::Type => {
-                                if func_ty.is_some() {
-                                    return Err(Error::new(None, "multiple 'type' blocks on func"));
-                                }
-                                let (id, ty) = FuncType::parse(tokens)?.into_parts();
-                                match id {
-                                    Some(id) if ty.is_empty() => {
-                                        func_ty = Some(this.types.get(&id).ok_or_else(|| {
-                                            Error::new(
-                                                None,
-                                                format!("func type id {id} does not exist"),
-                                            )
-                                        })?);
-                                    }
-                                    Some(id) => {
-                                        return Err(Error::new(
-                                            None,
-                                            format!(
-                                            "func type id {id} defines types. thats not allowed"
-                                        ),
-                                        ))
-                                    }
-                                    None => {
-                                        return Err(Error::new(
-                                            None,
-                                            "func type was not associated with any id",
-                                        ))
-                                    }
-                                }
-                            }
-                            Keyword::Export => match &export {
-                                Some(_) => {
-                                    return Err(Error::new(
-                                        None,
-                                        "multiple 'export' blocks on func",
-                                    ))
-                                }
-                                None => {
-                                    export = Some(RelativeExport::parse(tokens)?);
-                                }
-                            },
-                            Keyword::Import => match &import {
-                                Some(_) => {
-                                    return Err(Error::new(
-                                        None,
-                                        "multiple 'import' blocks on func",
-                                    ))
-                                }
-                                None => {
-                                    import = Some(RelativeImport::parse(tokens)?);
-                                }
-                            },
-                            Keyword::Param => params.extend(FuncParam::parse(tokens)?.0),
-                            Keyword::Result => result.extend(FuncResult::parse(tokens)?.0),
-                            _ => break,
-                        }
-                    }
-                    // Get all locals
-                    loop {
-                        if tokens.peek().copied().try_right_paran().is_some() {
-                            break;
-                        }
-                        tokens.peek().copied().expect_left_paren()?;
-                        match tokens.clone().nth(1).expect_keyword()? {
-                            Keyword::Local => {
-                                tokens.next().expect_left_paren()?;
-                                tokens.next().expect_keyword_token(Keyword::Local)?;
-                                locals.push(ValueType::parse(tokens)?)
-                            }
-                            _ => break,
-                        }
-                        tokens.next().expect_right_paren()?;
-                    }
-                    // Get the instructions for the function
-                    loop {
-                        if tokens.peek().copied().try_right_paran().is_some() {
-                            break;
-                        }
-                        tokens.peek().copied().expect_left_paren()?;
-                        match tokens.clone().nth(1).expect_keyword()? {
-                            // Block Instruction
-                            Keyword::Block => {
-                                // BlockInstruction::parse(tokens)?;
-                            }
-                            Keyword::Loop => {}
-                            Keyword::If => {}
-
-                            // Plain Instruction
-                            Keyword::Unreachable => {}
-                            Keyword::Nop => {}
-                            Keyword::Br => {}
-                            Keyword::BrIf => {}
-                            Keyword::BrTable => {}
-                            Keyword::Return => {}
-                            Keyword::Call => {}
-                            Keyword::CallIndirect => {}
-
-                            _ => todo!("hello"),
-                        }
-                        tokens.next().expect_right_paren()?;
-                    }
-
-                    // Function loop completed. Add everything parsed to the module
-                    let ty = match func_ty {
-                        Some(ty) if params.is_empty() && result.is_empty() => ty.clone(),
-                        Some(ty)
-                            if ty.input().values() == params.values()
-                                && ty.output().values() == result.values() =>
-                        {
-                            ty.clone()
-                        }
-                        None => FunctionType::new(params, result),
-                        Some(ty) => {
-                            return Err(Error::new(
-                                None,
-                                "function type and parameters do not match",
-                            ))
-                        }
-                    };
-
-                    let expression = Expression::new(instructions);
-                    // this.types.push(None, FunctionType::new(params, result));
-                    // let ty_index = (this.types.len() - 1).try_into().unwrap();
-                    this.functions.push(Function::new(
-                        FnType::Coded(Box::new(ty)),
-                        locals,
-                        expression,
-                    ));
-                    if let Some(name) = export {
-                        let index = (this.functions.len() - 1).try_into().unwrap();
-                        this.export
-                            .push(Export::new(name.name, ExportDescription::Func(index)))
-                    }
-                }
+                Keyword::Func => this.functions.push(FunctionDefinition::parse(tokens)?),
                 Keyword::Table => {
                     tokens.next().expect_left_paren()?;
                     tokens.next().expect_keyword_token(Keyword::Table)?;
