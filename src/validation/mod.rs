@@ -47,12 +47,12 @@ use instruction::Const;
 
 use crate::{
     parse::{
-        ast::{read_number, Error, ErrorTy, Expect, Parse},
+        ast::{read_number, Error, Expect, Parse},
         Keyword, Token,
     },
     structure::types::{
-        FunctionIndex, FunctionType, GlobalType, MemoryType, NumType, RefType, ResultType,
-        TableType, ValueType,
+        FunctionIndex, FunctionType, GlobalType, MemoryType, RefType, ResultType, TableType,
+        ValueType,
     },
 };
 
@@ -345,7 +345,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for ConstantExpress
         tokens.next().expect_left_paren()?;
         match tokens.next().expect_keyword()? {
             Keyword::Const(ty) => {
-                let number = read_number(ty, tokens.next().expect_number()?)?;
+                let number = read_number(ty.clone(), tokens.next().expect_number()?)?;
                 tokens.next().expect_right_paren()?;
                 Ok(ConstantExpression {
                     instructions: vec![Box::new(Const::new(ty, number))],

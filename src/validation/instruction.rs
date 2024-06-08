@@ -76,7 +76,7 @@ impl ValidateInstruction for UnaryOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, _: &mut Context, input: &mut Input) -> ValidateResult<Vec<ValueType>> {
         let value = input.pop()?;
-        if value.try_into_num()? == self.ty {
+        if value.clone().try_into_num()? == self.ty {
             Ok(vec![value])
         } else {
             Err(ValidationError::new())
@@ -85,7 +85,7 @@ impl ValidateInstruction for UnaryOperation {
 }
 impl Execute for UnaryOperation {
     fn exec(&self, stack: &mut Stack) -> Result<(), Trap> {
-        let number = stack.pop_and_assert_num(self.ty)?;
+        let _number = stack.pop_and_assert_num(self.ty.clone())?;
         Ok(())
     }
 }
@@ -320,7 +320,7 @@ pub struct VectorSplatOperation {
 }
 impl ValidateInstruction for VectorSplatOperation {
     // type Output = [ValueType; 1];
-    fn validate(&self, _: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
+    fn validate(&self, _: &mut Context, _inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         // unpacked(VectorShape), takes an V128 from the top and "unpacks" it?
         // Does unpack mean take one value, or all of them? For example, if I have
         // I32x4, Does that mean i pop 4 inputs off the top and pack them into an
@@ -780,7 +780,7 @@ pub struct ElementDropOperation {
 }
 impl ValidateInstruction for ElementDropOperation {
     // type Output = [ValueType; 0];
-    fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
+    fn validate(&self, ctx: &mut Context, _inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         ctx.get_element(self.element)?;
         Ok(vec![])
     }
@@ -1028,7 +1028,7 @@ impl ValidateInstruction for VectorStoreNLaneMemoryOperation {
 pub struct MemorySize(Option<MemoryIndex>);
 impl ValidateInstruction for MemorySize {
     // type Output = [ValueType; 1];
-    fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
+    fn validate(&self, ctx: &mut Context, _inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         let _ = ctx.get_memory(self.0)?;
         Ok(vec![ValueType::Num(NumType::I32)])
     }
@@ -1109,7 +1109,7 @@ impl ValidateInstruction for NopOperation {
 pub struct UnreachableOperation;
 impl ValidateInstruction for UnreachableOperation {
     // type Output = Vec<ValueType>;
-    fn validate(&self, _: &mut Context, input: &mut Input) -> ValidateResult<Vec<ValueType>> {
+    fn validate(&self, _: &mut Context, _input: &mut Input) -> ValidateResult<Vec<ValueType>> {
         // What? I can take all types and return all types?
         // https://webassembly.github.io/spec/core/valid/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-unreachable
         // I think what this means is that we don't take any types or values
@@ -1139,7 +1139,7 @@ impl ValidateInstruction for BlockOperation {
         if *ty.output() == label && *ty.output().values() == output {
             // This should never trigger
             for input_ty in ty.input().values() {
-                let _ = inputs.pop()?.try_into_value_type(input_ty)?;
+                let _ = inputs.pop()?.try_into_value_type(&input_ty)?;
             }
             return Ok(ty.output().clone().values().to_vec());
         }
@@ -1167,7 +1167,7 @@ impl ValidateInstruction for LoopOperation {
         if *ty.output() == label && *ty.output().values() == output {
             // This should never trigger
             for input_ty in ty.input().values() {
-                let _ = inputs.pop()?.try_into_value_type(input_ty)?;
+                let _ = inputs.pop()?.try_into_value_type(&input_ty)?;
             }
             return Ok(ty.output().clone().values().to_vec());
         }
@@ -1203,7 +1203,7 @@ impl ValidateInstruction for IfOperation {
             // validate that the input stack has an i32 and all of of the function types arguments
             let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
             for input_ty in ty.input().values() {
-                let _ = inputs.pop()?.try_into_value_type(input_ty)?;
+                let _ = inputs.pop()?.try_into_value_type(&input_ty)?;
             }
             return Ok(ty.output().clone().values().to_vec());
         }
@@ -1220,7 +1220,7 @@ impl ValidateInstruction for BrOperation {
         let ty = ctx.get_label(self.label)?;
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
         for input_ty in ty.values() {
-            let _ = inputs.pop()?.try_into_value_type(input_ty)?;
+            let _ = inputs.pop()?.try_into_value_type(&input_ty)?;
         }
         Ok(ty.values().to_vec())
     }
@@ -1235,7 +1235,7 @@ impl ValidateInstruction for BrIfOperation {
         let ty = ctx.get_label(self.label)?;
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
         for input_ty in ty.values() {
-            let _ = inputs.pop()?.try_into_value_type(input_ty)?;
+            let _ = inputs.pop()?.try_into_value_type(&input_ty)?;
         }
         Ok(ty.values().to_vec())
     }
@@ -1296,7 +1296,7 @@ impl ValidateInstruction for ReturnOperation {
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         let ty_set = ctx.returning().ok_or_else(ValidationError::new)?;
         for ty in ty_set.values() {
-            let _ = inputs.pop()?.try_into_value_type(ty)?;
+            let _ = inputs.pop()?.try_into_value_type(&ty)?;
         }
         Ok(ty_set.values().to_vec())
     }
@@ -1312,7 +1312,7 @@ impl ValidateInstruction for CallOperation {
         let func = ctx.get_function(self.function)?;
         // validate function input arguments
         for ty in func.input().values() {
-            let _ = inputs.pop()?.try_into_value_type(ty)?;
+            let _ = inputs.pop()?.try_into_value_type(&ty)?;
         }
         // if all valid, return output arguments
         Ok(func.output().values().to_vec())
@@ -1335,7 +1335,7 @@ impl ValidateInstruction for CallIndirectOperation {
         // validate the function
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
         for input_ty in ty.input().values() {
-            let _ = inputs.pop()?.try_into_value_type(input_ty)?;
+            let _ = inputs.pop()?.try_into_value_type(&input_ty)?;
         }
         Ok(ty.output().values().to_vec())
     }

@@ -1,7 +1,6 @@
 use std::{fmt::Display, iter::Peekable};
 
 use crate::{
-    ast::Expr,
     execution::PAGE_SIZE,
     parse::{
         ast::{read_u32, Error, Expect, Parse, TryGet},
@@ -10,7 +9,7 @@ use crate::{
     validation::{Context, Input, ValidateInstruction, Validation, ValidationError},
 };
 
-use super::module::{get_id, get_index, get_next_keyword, Data, Module};
+use super::module::{get_id, get_index, get_next_keyword, Module};
 
 /// Type of sign an integer is meant to taken as
 ///
@@ -78,9 +77,16 @@ impl Variable {
     }
 }
 
+#[derive(Clone)]
 pub enum Index {
     Id(String),
     Index(u32),
+}
+
+impl Default for Index {
+    fn default() -> Self {
+        todo!()
+    }
 }
 
 pub type TypeIndex = u32;
@@ -357,7 +363,7 @@ impl Validation<Limit> for Limit {
 /// They are also used to classify the input and outputs of ["Instructions"].
 ///
 /// Can be represented in rust as (Box<dyn Fn(ResultType) -> ResultType>)
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
 pub struct FunctionType {
     input: ResultType,
     output: ResultType,
@@ -434,8 +440,11 @@ impl ResultType {
         Self { values }
     }
 
-    pub fn values(&self) -> Vec<&ValueType> {
-        self.values.iter().map(|i| i.ty()).collect::<Vec<_>>()
+    pub fn values(&self) -> Vec<ValueType> {
+        self.values
+            .iter()
+            .map(|i| i.ty().clone())
+            .collect::<Vec<_>>()
     }
 
     pub fn take(self) -> Vec<Variable> {
@@ -516,7 +525,7 @@ pub type ExternRef = i32;
 
 /// ValueType are individual values that wasm can compute and a value that a
 /// variable can use.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ValueType {
     Num(NumType),
     VecType(VecType),
@@ -672,7 +681,7 @@ pub type Pointer = i32;
 
 /// Number types are transparent, meaning that their bit patterns can be observed.
 /// Values of number type can be stored in ["Memory"].
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NumType {
     I32, // servers as Booleans and Memory Addresses
     I64,
@@ -891,6 +900,7 @@ impl Display for NumType {
     }
 }
 
+#[derive(Default, Clone)]
 pub struct RelativeExport {
     pub name: String,
 }
@@ -905,6 +915,7 @@ impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for RelativeExport {
     }
 }
 
+#[derive(Default, Clone)]
 pub struct RelativeImport {
     module: String,
     name: String,
@@ -921,6 +932,7 @@ impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for RelativeImport {
     }
 }
 
+#[derive(Default, Clone)]
 pub struct TypeUse(Index);
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for TypeUse {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
@@ -1236,7 +1248,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for AssertInvalid {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct FunctionDefinition {
     // id
     id: Option<String>,

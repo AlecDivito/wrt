@@ -2,7 +2,7 @@ use crate::parse::{
     ast::{read_u32, Error, Expect, TryGet},
     Keyword, TokenType,
 };
-use std::{collections::HashSet, convert::TryInto, iter::Peekable};
+use std::{collections::HashSet, iter::Peekable};
 
 use crate::{
     parse::{ast::Parse, Token},
@@ -14,10 +14,9 @@ use crate::{
 
 use super::{
     types::{
-        FuncParam, FuncResult, FuncType, FunctionDefinition, FunctionIndex, FunctionType,
-        GlobalIndex, GlobalType, Index, Limit, MemoryIndex, MemoryOpts, MemoryType, RefType,
-        RelativeExport, RelativeImport, ResultType, StartOpts, TableIndex, TableType, TypeIndex,
-        ValueType,
+        FunctionDefinition, FunctionIndex, FunctionType, GlobalIndex, GlobalType, Index, Limit,
+        MemoryIndex, MemoryOpts, MemoryType, RefType, StartOpts, TableIndex, TableType, TypeIndex,
+        TypeUse, ValueType,
     },
     util::IndexedVec,
 };
@@ -63,11 +62,11 @@ impl ValidateInstruction for Function {
         // locals set to the sequence [func input args, locals]
         // labels set to singular sequence containing only [func result type]
         // return set to the [func result type]
-        let locals = [ty.input().values(), &self.locals].concat();
+        let locals = [ty.input().values(), self.locals.clone()].concat();
         ctx1.prepare_function_execution(locals, ty);
 
         let output = self.body.validate(&mut ctx1, inputs)?;
-        if output == *ty.output().values() {
+        if output == ty.output().values() {
             Ok(output)
         } else {
             Err(ValidationError::new())
@@ -361,26 +360,30 @@ impl ValidateInstruction for Import {
     }
 }
 
-impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for Import {
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Import {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
         tokens.next().expect_left_paren()?;
         tokens.next().expect_keyword_token(Keyword::Import)?;
         let module = tokens.next().expect_string()?;
         let name = tokens.next().expect_string()?;
-        match get_next_keyword(tokens) {
-            Some(Keyword::Func) => FunctionDefinition::parse(tokens),
+        let description = match get_next_keyword(tokens) {
+            Some(Keyword::Func) => todo!(), // ImportDescription::Func(FunctionDefinition::parse(tokens)?),
             Some(Keyword::Table) => todo!(),
             Some(Keyword::Memory) => todo!(),
             Some(Keyword::Global) => todo!(),
             value => {
                 return Err(Error::new(
-                    tokens.next().copied(),
+                    tokens.next().cloned(),
                     format!("Failed to parse Import Description"),
                 ))
             }
-        }
+        };
         tokens.next().expect_right_paren()?;
-        Ok(Import { module, name })
+        Ok(Import {
+            module,
+            name,
+            description,
+        })
     }
 }
 
@@ -394,7 +397,7 @@ pub struct Module {
     id_ctx: IDCtx,
 
     // Types definitions inside of the web assembly
-    types: IndexedVec<FunctionType>,
+    types: IndexedVec<TypeUse>,
 
     // Functions inside of the module
     functions: Vec<FunctionDefinition>,
@@ -462,7 +465,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Module {
         loop {
             tokens.peek().copied().expect_left_paren()?;
             match tokens.clone().nth(1).expect_keyword()? {
-                Keyword::Type => this.types.push_tuple(FuncType::parse(tokens)?.into_parts()),
+                // Keyword::Type => this.types.push(TypeUse::parse(tokens)?),
                 Keyword::Func => this.functions.push(FunctionDefinition::parse(tokens)?),
                 Keyword::Table => {
                     tokens.next().expect_left_paren()?;
@@ -588,7 +591,7 @@ impl ValidateInstruction for Module {
         // ## Under context of ctx
         // Every function in our module must be valid
         for func in &self.functions {
-            func.validate(ctx, inputs)?;
+            // func.validate(ctx, inputs)?;
         }
 
         // If module start exists, it must be valid
