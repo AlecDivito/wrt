@@ -15,8 +15,8 @@ use crate::{
 use super::{
     types::{
         FunctionDefinition, FunctionIndex, FunctionType, GlobalIndex, GlobalType, Index, Limit,
-        MemoryIndex, MemoryOpts, MemoryType, RefType, StartOpts, TableIndex, TableType, TypeIndex,
-        TypeUse, ValueType,
+        MemoryIndex, MemoryOpts, MemoryType, RefType, StartOpts, TableIndex, TableType,
+        TypeDefinition, TypeIndex, ValueType,
     },
     util::IndexedVec,
 };
@@ -54,23 +54,24 @@ impl Function {
 
 impl ValidateInstruction for Function {
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let ty = match &self.ty_index {
-            FnType::Index(index) => ctx.get_type(*index)?,
-            FnType::Coded(ty) => &*ty,
-        };
-        let mut ctx1 = ctx.clone();
-        // locals set to the sequence [func input args, locals]
-        // labels set to singular sequence containing only [func result type]
-        // return set to the [func result type]
-        let locals = [ty.input().values(), self.locals.clone()].concat();
-        ctx1.prepare_function_execution(locals, ty);
+        todo!("Alec validate insturction validate call is not implemented")
+        // let ty = match &self.ty_index {
+        //     FnType::Index(index) => ctx.get_type(*index)?,
+        //     FnType::Coded(ty) => &*ty,
+        // };
+        // let mut ctx1 = ctx.clone();
+        // // locals set to the sequence [func input args, locals]
+        // // labels set to singular sequence containing only [func result type]
+        // // return set to the [func result type]
+        // let locals = [ty.input().values(), self.locals.clone()].concat();
+        // ctx1.prepare_function_execution(locals, ty);
 
-        let output = self.body.validate(&mut ctx1, inputs)?;
-        if output == ty.output().values() {
-            Ok(output)
-        } else {
-            Err(ValidationError::new())
-        }
+        // let output = self.body.validate(&mut ctx1, inputs)?;
+        // if output == ty.output().values() {
+        //     Ok(output)
+        // } else {
+        //     Err(ValidationError::new())
+        // }
     }
 }
 
@@ -254,7 +255,7 @@ impl ValidateInstruction for Data {
 pub struct StartFunction(u32);
 impl ValidateInstruction for StartFunction {
     fn validate(&self, ctx: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let ty = ctx.get_function(self.0)?;
+        let ty = ctx.get_function(&Index::Index(self.0))?;
         if ty.input().values().is_empty() && ty.output().values().is_empty() {
             Ok(vec![])
         } else {
@@ -275,7 +276,7 @@ impl ValidateInstruction for ExportDescription {
     fn validate(&self, ctx: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
         match self {
             ExportDescription::Func(index) => {
-                ctx.get_function(*index)?.validate(ctx, ())?;
+                ctx.get_function(&Index::Index(*index))?.validate(ctx, ())?;
             }
             ExportDescription::Table(index) => {
                 ctx.get_table(*index)?.validate(ctx, ())?;
@@ -324,7 +325,7 @@ impl ValidateInstruction for ImportDescription {
     fn validate(&self, ctx: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
         match self {
             ImportDescription::Func(index) => {
-                ctx.get_function(*index)?.validate(ctx, ())?;
+                ctx.get_function(&Index::Index(*index))?.validate(ctx, ())?;
             }
             ImportDescription::Table(index) => {
                 ctx.get_table(*index)?.validate(ctx, ())?;
@@ -392,12 +393,11 @@ pub struct IDCtx {
     funcs: Vec<Option<String>>,
 }
 
-#[derive(Default)]
 pub struct Module {
     id_ctx: IDCtx,
 
     // Types definitions inside of the web assembly
-    types: IndexedVec<TypeUse>,
+    types: Vec<TypeDefinition>,
 
     // Functions inside of the module
     functions: Vec<FunctionDefinition>,
@@ -430,6 +430,24 @@ pub struct Module {
     //
     // NOTE: Intended for use to initialize the state of a module.
     start: Vec<StartOpts>,
+}
+
+impl Default for Module {
+    fn default() -> Self {
+        Self {
+            id_ctx: Default::default(),
+            types: Vec::new(),
+            functions: Default::default(),
+            tables: Default::default(),
+            memories: Default::default(),
+            globals: Default::default(),
+            elements: Default::default(),
+            datas: Default::default(),
+            imports: Default::default(),
+            export: Default::default(),
+            start: Default::default(),
+        }
+    }
 }
 
 pub fn get_id<'a, I: Iterator<Item = &'a Token>>(iter: &mut Peekable<I>) -> Option<String> {
@@ -465,7 +483,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Module {
         loop {
             tokens.peek().copied().expect_left_paren()?;
             match tokens.clone().nth(1).expect_keyword()? {
-                // Keyword::Type => this.types.push(TypeUse::parse(tokens)?),
+                Keyword::Type => this.types.push(TypeDefinition::parse(tokens)?),
                 Keyword::Func => this.functions.push(FunctionDefinition::parse(tokens)?),
                 Keyword::Table => {
                     tokens.next().expect_left_paren()?;

@@ -1,16 +1,333 @@
+use std::iter::Peekable;
+
 use crate::{
     execution::{Number, Stack, Trap},
-    structure::types::{
-        BlockType, DataIndex, ElementIndex, FloatVectorShape, FunctionIndex, FunctionReference,
-        GlobalType, HalfType, IntegerVectorShape, LabelIndex, LocalIndex, MemoryArgument,
-        MemoryIndex, MemoryLoadNumber, MemoryWidth, MemoryZeroWidth, NumType, RefType, SignType,
-        TableIndex, TypeIndex, ValueType, VecType, VectorMemoryOp, VectorShape,
+    parse::{
+        ast::{read_number, read_u32, Error, Expect, Parse},
+        Keyword, Token,
+    },
+    structure::{
+        module::{get_id, get_next_keyword},
+        types::{
+            BlockType, DataIndex, ElementIndex, FloatVectorShape, FuncResult, FunctionIndex,
+            FunctionReference, GlobalType, HalfType, Index, IntType, IntegerVectorShape,
+            LabelIndex, LocalIndex, MemoryArgument, MemoryIndex, MemoryLoadNumber, MemoryWidth,
+            MemoryZeroWidth, NumType, RefType, SignType, TableIndex, TypeIndex, ValueType, VecType,
+            VectorMemoryOp, VectorShape,
+        },
     },
 };
 
 use super::{
     Context, Input, InstructionSequence, ValidateInstruction, ValidateResult, ValidationError,
 };
+
+#[derive(Clone)]
+enum Operation {
+    Const(Const),
+    Nop(NopOperation),
+    GlobalGet(GlobalGetOperation),
+    LocalGet(LocalGetOperation),
+    Unreachable(UnreachableOperation),
+
+    // Parametric
+    Drop(DropOperation),
+    Select(SelectOperation),
+
+    // Control
+    Block(BlockOperation),
+    Call(CallOperation),
+    Loop(LoopOperation),
+
+    // Unary
+    Test(TestOperation),
+    Unary(UnaryOperation),
+}
+
+impl Default for Operation {
+    fn default() -> Self {
+        Operation::Nop(NopOperation {})
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct Opcode {
+    op: Operation,
+    children: Vec<Opcode>,
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Opcode {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        tokens.next().expect_left_paren()?;
+        let op = match tokens.next().expect_keyword()? {
+            Keyword::FuncRef => todo!(),
+            Keyword::ExternRef => todo!(),
+            Keyword::VecShape(_) => todo!(),
+            Keyword::Extern => todo!(),
+            Keyword::Mut => todo!(),
+            Keyword::Nop => Operation::Nop(NopOperation {}),
+            Keyword::Unreachable => Operation::Unreachable(UnreachableOperation {}),
+            Keyword::Drop => Operation::Drop(DropOperation {}),
+            Keyword::Block => Operation::Block(BlockOperation::parse(tokens)?),
+            Keyword::Loop => Operation::Loop(LoopOperation::parse(tokens)?),
+            Keyword::End => todo!(),
+            Keyword::Br => todo!(),
+            Keyword::BrIf => todo!(),
+            Keyword::BrTable => todo!(),
+            Keyword::Return => todo!(),
+            Keyword::If => todo!(),
+            Keyword::Then => todo!(),
+            Keyword::Else => todo!(),
+            Keyword::Select => Operation::Select(SelectOperation::parse(tokens)?),
+            Keyword::Call => Operation::Call(CallOperation::parse(tokens)?),
+            Keyword::CallIndirect => todo!(),
+            Keyword::LocalGet => Operation::LocalGet(LocalGetOperation::parse(tokens)?),
+            Keyword::LocalSet => todo!(),
+            Keyword::LocalTee => todo!(),
+            Keyword::GlobalGet => Operation::GlobalGet(GlobalGetOperation::parse(tokens)?),
+            Keyword::GlobalSet => todo!(),
+            Keyword::TableGet => todo!(),
+            Keyword::TableSet => todo!(),
+            Keyword::TableSize => todo!(),
+            Keyword::TableGrow => todo!(),
+            Keyword::TableFill => todo!(),
+            Keyword::TableCopy => todo!(),
+            Keyword::TableInit => todo!(),
+            Keyword::ElemDrop => todo!(),
+            Keyword::MemorySize => todo!(),
+            Keyword::MemoryGrow => todo!(),
+            Keyword::MemoryFill => todo!(),
+            Keyword::MemoryCopy => todo!(),
+            Keyword::MemoryInit => todo!(),
+            Keyword::DataDrop => todo!(),
+            Keyword::Load(_) => todo!(),
+            Keyword::Store(_) => todo!(),
+            Keyword::I32Load8(_) => todo!(),
+            Keyword::I32Load16(_) => todo!(),
+            Keyword::I64Load8(_) => todo!(),
+            Keyword::I64Load16(_) => todo!(),
+            Keyword::I64Load32(_) => todo!(),
+            Keyword::I32Store8 => todo!(),
+            Keyword::I32Store16 => todo!(),
+            Keyword::I64Store8 => todo!(),
+            Keyword::I64Store16 => todo!(),
+            Keyword::I64Store32 => todo!(),
+            Keyword::MemArgsAlign(_) => todo!(),
+            Keyword::MemArgsOffset(_) => todo!(),
+            Keyword::Declare => todo!(),
+            Keyword::Offset => todo!(),
+            Keyword::Item => todo!(),
+            Keyword::V128Load => todo!(),
+            Keyword::V128Store => todo!(),
+            Keyword::VecLoad8x8(_) => todo!(),
+            Keyword::VecLoad16x4(_) => todo!(),
+            Keyword::VecLoad32x2(_) => todo!(),
+            Keyword::VecLoadSplat(_) => todo!(),
+            Keyword::VecLoadZero(_) => todo!(),
+            Keyword::VecLoadLane(_) => todo!(),
+            Keyword::VecStoreLane(_) => todo!(),
+            Keyword::Const(expected) => {
+                let value = read_number(expected, tokens.next().expect_number()?)?;
+                Operation::Const(Const::new(expected, value))
+            }
+            Keyword::ConstV128 => todo!(),
+            Keyword::RefNull => todo!(),
+            Keyword::RefFunc => todo!(),
+            Keyword::RefExtern => todo!(),
+            Keyword::RefIsNull => todo!(),
+            Keyword::IntClz(_) => todo!(),
+            Keyword::IntCtz(_) => todo!(),
+            Keyword::IntPopCnt(_) => todo!(),
+            Keyword::IntExtend8Signed(_) => todo!(),
+            Keyword::IntExtend16Signed(_) => todo!(),
+            Keyword::I64Extend32Signed => todo!(),
+
+            Keyword::NegativeFloat(expected) => {
+                Operation::Unary(UnaryOperation::new(expected, UnaryFunction::Neg))
+            }
+            Keyword::AbsoluteFloat(expected) => {
+                Operation::Unary(UnaryOperation::new(expected, UnaryFunction::Abs))
+            }
+            Keyword::SquareRootFloat(expected) => {
+                Operation::Unary(UnaryOperation::new(expected, UnaryFunction::Sqrt))
+            }
+            Keyword::CeilFloat(expected) => {
+                Operation::Unary(UnaryOperation::new(expected, UnaryFunction::Ceil))
+            }
+            Keyword::FloorFLoat(expected) => {
+                Operation::Unary(UnaryOperation::new(expected, UnaryFunction::Floor))
+            }
+            Keyword::NearestFloat(expected) => {
+                Operation::Unary(UnaryOperation::new(expected, UnaryFunction::Nearest))
+            }
+            Keyword::TruncateFloat(expected) => {
+                Operation::Unary(UnaryOperation::new(expected, UnaryFunction::Trunc))
+            }
+            Keyword::AddInt(_) => todo!(),
+            Keyword::SubInt(_) => todo!(),
+            Keyword::MultiplyInt(_) => todo!(),
+            Keyword::AndInt(_) => todo!(),
+            Keyword::OrInt(_) => todo!(),
+            Keyword::XORInt(_) => todo!(),
+            Keyword::ShiftLeftInt(_) => todo!(),
+            Keyword::DivideInt { shape, sign } => todo!(),
+            Keyword::RemainderInt { shape, sign } => todo!(),
+            Keyword::ShiftRightInt { shape, sign } => todo!(),
+            Keyword::RotateInt { shape, direction } => todo!(),
+            Keyword::AddFloat(_) => todo!(),
+            Keyword::SubFloat(_) => todo!(),
+            Keyword::MultiplyFloat(_) => todo!(),
+            Keyword::DivideFloat(_) => todo!(),
+            Keyword::MinFloat(_) => todo!(),
+            Keyword::MaxFloat(_) => todo!(),
+            Keyword::CopySign(_) => todo!(),
+
+            // Testing
+            Keyword::I32EqualTest => Operation::Test(TestOperation::new(IntType::I32)),
+            Keyword::I64EqualTest => Operation::Test(TestOperation::new(IntType::I64)),
+
+            Keyword::CompareIntEqual(_) => todo!(),
+            Keyword::CompareIntNotEqual(_) => todo!(),
+            Keyword::CompareIntLessThen { shape, sign } => todo!(),
+            Keyword::CompareIntLessOrEqual { shape, sign } => todo!(),
+            Keyword::CompareIntGreaterThen { shape, sign } => todo!(),
+            Keyword::CompareIntGreaterOrEqual { shape, sign } => todo!(),
+            Keyword::CompareFloatEqual(_) => todo!(),
+            Keyword::CompareFloatNotEqual(_) => todo!(),
+            Keyword::CompareFloatLessThen(_) => todo!(),
+            Keyword::CompareFloatLessOrEqual(_) => todo!(),
+            Keyword::CompareFloatGreaterThen(_) => todo!(),
+            Keyword::CompareFloatGreaterOrEqual(_) => todo!(),
+            Keyword::I32WrapI64 => todo!(),
+            Keyword::I64ExtendI32(_) => todo!(),
+            Keyword::F32DemoteF64 => todo!(),
+            Keyword::F64PromoteF32 => todo!(),
+            Keyword::I32TruncateF32(_) => todo!(),
+            Keyword::I64TruncateF32(_) => todo!(),
+            Keyword::I32TruncateF64(_) => todo!(),
+            Keyword::I64TruncateF64(_) => todo!(),
+            Keyword::I32TruncateSatF32(_) => todo!(),
+            Keyword::I64TruncateSatF32(_) => todo!(),
+            Keyword::I32TruncateSatF64(_) => todo!(),
+            Keyword::I64TruncateSatF64(_) => todo!(),
+            Keyword::F32ConvertI32(_) => todo!(),
+            Keyword::F32ConvertI64(_) => todo!(),
+            Keyword::F64ConvertI32(_) => todo!(),
+            Keyword::F64ConvertI64(_) => todo!(),
+            Keyword::F32ReinterpretI32 => todo!(),
+            Keyword::F64ReinterpretI64 => todo!(),
+            Keyword::I32ReinterpretI32 => todo!(),
+            Keyword::I64ReinterpretI64 => todo!(),
+            Keyword::V128Not => todo!(),
+            Keyword::V128And => todo!(),
+            Keyword::V128AndNot => todo!(),
+            Keyword::V128Or => todo!(),
+            Keyword::V128XOr => todo!(),
+            Keyword::V128BitSelect => todo!(),
+            Keyword::V128AnyTrue => todo!(),
+            Keyword::VecIntNegative(_) => todo!(),
+            Keyword::VecIntAbsolute(_) => todo!(),
+            Keyword::VecI8x16PopCnt => todo!(),
+            Keyword::VecI8x16AverageUnsigned => todo!(),
+            Keyword::VecI16x8AverageUnsigned => todo!(),
+            Keyword::VecFloatNegative(_) => todo!(),
+            Keyword::VecFloatAbsolute(_) => todo!(),
+            Keyword::VecFloatSquareRoot(_) => todo!(),
+            Keyword::VecFloatCeil(_) => todo!(),
+            Keyword::VecFloatFloor(_) => todo!(),
+            Keyword::VecFloatTruncate(_) => todo!(),
+            Keyword::VecFloatNearest(_) => todo!(),
+            Keyword::I32x4TruncSatF32x4(_) => todo!(),
+            Keyword::I32x4TruncSatF64x2Zero(_) => todo!(),
+            Keyword::F64x2PromoteLowF32x4 => todo!(),
+            Keyword::F32x4PemoteF64x2Zero => todo!(),
+            Keyword::F32x4ConvertI32x4(_) => todo!(),
+            Keyword::F64x2ConvertLowI32x4(_) => todo!(),
+            Keyword::I16x8ExtendAddPairwiseI8x16(_) => todo!(),
+            Keyword::I32x4ExtaddPairwiseI16x8(_) => todo!(),
+            Keyword::VecIntEqual(_) => todo!(),
+            Keyword::VecIntNotEqual(_) => todo!(),
+            Keyword::VecIntLessThen { shape, sign } => todo!(),
+            Keyword::VecIntLessOrEqual { shape, sign } => todo!(),
+            Keyword::VecIntGreaterThen { shape, sign } => todo!(),
+            Keyword::VecIntGreaterOrEqual { shape, sign } => todo!(),
+            Keyword::VecEqualFloat(_) => todo!(),
+            Keyword::VecNotEqualFloat(_) => todo!(),
+            Keyword::VecLessThenFloat(_) => todo!(),
+            Keyword::VecLessOrEqualFloat(_) => todo!(),
+            Keyword::VecGreaterThenFloat(_) => todo!(),
+            Keyword::VecGreaterOrEqualFloat(_) => todo!(),
+            Keyword::VecSwizzleFloatI8x16 => todo!(),
+            Keyword::VecIntAdd(_) => todo!(),
+            Keyword::VecIntSub(_) => todo!(),
+            Keyword::VecIntMultiplyI16x8 => todo!(),
+            Keyword::VecIntMultiplyI32x4 => todo!(),
+            Keyword::VecIntMultiplyI64x2 => todo!(),
+            Keyword::VecAddSatI16x8(_) => todo!(),
+            Keyword::VecSubtractSatI16x8(_) => todo!(),
+            Keyword::VecI32x4DotProductOfI16x8Signed => todo!(),
+            Keyword::VecMinInt { shape, sign } => todo!(),
+            Keyword::VecMaxInt { shape, sign } => todo!(),
+            Keyword::VecSubFloat(_) => todo!(),
+            Keyword::VecAddSatI8x16(_) => todo!(),
+            Keyword::VecSubtractSatI8x16(_) => todo!(),
+            Keyword::VecAddFloat(_) => todo!(),
+            Keyword::VecDivFloat(_) => todo!(),
+            Keyword::VecMulFloat(_) => todo!(),
+            Keyword::VecMinFloat(_) => todo!(),
+            Keyword::VecMaxFloat(_) => todo!(),
+            Keyword::VecPMin(_) => todo!(),
+            Keyword::VecPMax(_) => todo!(),
+            Keyword::I16x8Q15mulrSatS => todo!(),
+            Keyword::I8x16NarrowI16x8(_) => todo!(),
+            Keyword::I16x8NarrowI32x4(_) => todo!(),
+            Keyword::I16x8ExtendI8x16 { half, sign } => todo!(),
+            Keyword::I32x4ExtendI16x8 { half, sign } => todo!(),
+            Keyword::I64x2ExtendI32x4 { half, sign } => todo!(),
+            Keyword::I16x8ExtendMultiplyI8x16 { half, sign } => todo!(),
+            Keyword::I32x4ExtendMultiplyI16x8 { half, sign } => todo!(),
+            Keyword::I64x2ExtendMultiplyI32x4 { half, sign } => todo!(),
+            Keyword::VecTest(_) => todo!(),
+            Keyword::VecBitmask(_) => todo!(),
+            Keyword::VecShiftLeft(_) => todo!(),
+            Keyword::VecShiftRight { shape, sign } => todo!(),
+            Keyword::VecShuffle => todo!(),
+            Keyword::VecSplat(_) => todo!(),
+            Keyword::VecExtract { shape, sign } => todo!(),
+            Keyword::VecReplate(_) => todo!(),
+            Keyword::Module => todo!(),
+            Keyword::Bin => todo!(),
+            Keyword::Quote => todo!(),
+            Keyword::Script => todo!(),
+            Keyword::Register => todo!(),
+            Keyword::Invoke => todo!(),
+            Keyword::Get => todo!(),
+            Keyword::AssertMalformed => todo!(),
+            Keyword::AssertInvalid => todo!(),
+            Keyword::AssertUnlinkable => todo!(),
+            Keyword::AssertReturn => todo!(),
+            Keyword::AssertTrap => todo!(),
+            Keyword::AssertExhaustion => todo!(),
+            Keyword::NaNCanonical => todo!(),
+            Keyword::NaNArithmetic(_) => todo!(),
+            Keyword::Infinit => todo!(),
+            Keyword::NaN => todo!(),
+            Keyword::Input => todo!(),
+            Keyword::Output => todo!(),
+            keyword => {
+                return Err(Error::new(
+                    tokens.next().cloned(),
+                    format!("{:?} is not an instruction. It can't be used.", keyword),
+                ))
+            }
+        };
+        let mut children = vec![];
+        while tokens.peek().copied().expect_left_paren().is_ok() {
+            children.push(Opcode::parse(tokens)?);
+        }
+        tokens.next().expect_right_paren()?;
+        Ok(Opcode { op, children })
+    }
+}
 
 pub trait Execute {
     fn exec(&self, stack: &mut Stack) -> Result<(), Trap>;
@@ -40,6 +357,7 @@ const_instruction!(ConstF32, F32, f32); // Create ConstI32 type
 const_instruction!(ConstF64, F64, f64); // Create ConstI32 type
 
 // Validate Const operations
+#[derive(Clone)]
 pub struct Const {
     // TODO(Alec): This could just be .value instead.
     ty: NumType,
@@ -54,7 +372,7 @@ impl Const {
 impl ValidateInstruction for Const {
     // type Output = [ValueType; 1];
     fn validate(&self, _: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        Ok(vec![ValueType::Num(self.ty.clone())])
+        Ok(vec![ValueType::Num(self.ty)])
     }
 }
 impl Execute for Const {
@@ -62,21 +380,45 @@ impl Execute for Const {
         if self.ty != self.value.ty() {
             Err(Trap::new())
         } else {
-            stack.push(self.value.clone());
+            stack.push(self.value);
             Ok(())
         }
     }
 }
 
+#[derive(Clone)]
+pub enum UnaryFunction {
+    // interger
+    Clz,
+    Ctz,
+    PopCnt,
+    // Float
+    Abs,
+    Neg,
+    Sqrt,
+    Ceil,
+    Floor,
+    Trunc,
+    Nearest,
+}
+
 // Validate Unary Operations. Only available for numbers.
+#[derive(Clone)]
 pub struct UnaryOperation {
     ty: NumType,
+    op: UnaryFunction,
+}
+
+impl UnaryOperation {
+    pub fn new(ty: impl Into<NumType>, op: UnaryFunction) -> Self {
+        Self { ty: ty.into(), op }
+    }
 }
 impl ValidateInstruction for UnaryOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, _: &mut Context, input: &mut Input) -> ValidateResult<Vec<ValueType>> {
         let value = input.pop()?;
-        if value.clone().try_into_num()? == self.ty {
+        if value.try_into_num()? == self.ty {
             Ok(vec![value])
         } else {
             Err(ValidationError::new())
@@ -85,7 +427,8 @@ impl ValidateInstruction for UnaryOperation {
 }
 impl Execute for UnaryOperation {
     fn exec(&self, stack: &mut Stack) -> Result<(), Trap> {
-        let _number = stack.pop_and_assert_num(self.ty.clone())?;
+        let _number = stack.pop_and_assert_num(self.ty)?;
+        todo!("Implment Unary Function");
         Ok(())
     }
 }
@@ -106,7 +449,15 @@ impl ValidateInstruction for BinaryOperation {
 }
 
 // Validate test operations. Only avalible for numbers
-pub struct TestOperation;
+#[derive(Clone)]
+pub struct TestOperation {
+    ty: IntType,
+}
+impl TestOperation {
+    pub fn new(ty: IntType) -> Self {
+        Self { ty }
+    }
+}
 impl ValidateInstruction for TestOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, _: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
@@ -185,7 +536,7 @@ pub struct FunctionReferenceOperation {
 impl ValidateInstruction for FunctionReferenceOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let _ = ctx.get_function(self.function_index)?;
+        let _ = ctx.get_function(&Index::Index(self.function_index))?;
         if ctx.contains_reference(self.function_index) {
             // Reference: https://webassembly.github.io/spec/core/valid/instructions.html#xref-syntax-instructions-syntax-instr-ref-mathsf-ref-func-x
             // TODO(Alec): We are supposed to be returning a function ref
@@ -543,7 +894,7 @@ impl ValidateInstruction for VectorShapeExtendAddPairWiseOperation {
 /**
  * Parametric Instructions
  */
-
+#[derive(Clone)]
 pub struct DropOperation;
 impl ValidateInstruction for DropOperation {
     // type Output = [ValueType; 0];
@@ -557,8 +908,37 @@ impl ValidateInstruction for DropOperation {
     }
 }
 
+#[derive(Clone)]
 pub struct SelectOperation {
-    t: Option<NumType>,
+    t: Option<ValueType>,
+
+    op1: Box<Opcode>,
+    op2: Box<Opcode>,
+    op3: Box<Opcode>,
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for SelectOperation {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        // TODO(Alec): In the future select may allow for more data to be selected
+        let t = if Some(Keyword::Result) == get_next_keyword(tokens) {
+            let mut result = FuncResult::parse(tokens)?.0;
+            let ty = result.pop().map(|ty| *ty.ty());
+            if !result.is_empty() {
+                return Err(Error::new(
+                    tokens.next().cloned(),
+                    "Select result block has too many arguments".to_string(),
+                ));
+            }
+            ty
+        } else {
+            None
+        };
+
+        let op1 = Box::new(Opcode::parse(tokens)?);
+        let op2 = Box::new(Opcode::parse(tokens)?);
+        let op3 = Box::new(Opcode::parse(tokens)?);
+
+        Ok(Self { t, op1, op2, op3 })
+    }
 }
 impl ValidateInstruction for SelectOperation {
     // type Output = [ValueType; 1];
@@ -569,8 +949,8 @@ impl ValidateInstruction for SelectOperation {
         let ty1 = inputs.pop()?;
         let ty2 = inputs.pop()?;
         match self.t {
-            Some(num) => {
-                if ty1 == ty2 && ValueType::Num(num) == ty1 && ValueType::Num(num) == ty2 {
+            Some(ty) => {
+                if ty1 == ty2 && ty == ty1 && ty == ty2 {
                     Ok(vec![ty1])
                 } else {
                     Err(ValidationError::new())
@@ -591,13 +971,21 @@ impl ValidateInstruction for SelectOperation {
  * Variable Instructions
  */
 
+#[derive(Clone)]
 pub struct LocalGetOperation {
     index: LocalIndex,
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for LocalGetOperation {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        let index = read_u32(tokens.next().expect_number()?)?;
+        Ok(Self { index })
+    }
 }
 impl ValidateInstruction for LocalGetOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        Ok(vec![ctx.get_local(self.index)?.clone()])
+        let a = *ctx.get_local(self.index)?;
+        Ok(vec![a])
     }
 }
 
@@ -625,8 +1013,15 @@ impl ValidateInstruction for LocalTeeOperation {
     }
 }
 
+#[derive(Clone)]
 pub struct GlobalGetOperation {
     index: LocalIndex,
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for GlobalGetOperation {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        let index = read_u32(tokens.next().expect_number()?)?;
+        Ok(Self { index })
+    }
 }
 impl ValidateInstruction for GlobalGetOperation {
     // type Output = [ValueType; 1];
@@ -664,7 +1059,7 @@ impl ValidateInstruction for TableGetOperation {
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         let table = ctx.get_table(self.index)?;
         inputs.pop()?.try_into_num()?.try_into_i32()?;
-        Ok(vec![ValueType::RefType(table.ref_type().clone())])
+        Ok(vec![ValueType::RefType(*table.ref_type())])
     }
 }
 
@@ -1098,7 +1493,13 @@ impl ValidateInstruction for DataDrop {
 /**
  * Control Instructions
  */
+#[derive(Clone)]
 pub struct NopOperation;
+impl Execute for NopOperation {
+    fn exec(&self, _: &mut Stack) -> Result<(), Trap> {
+        Ok(())
+    }
+}
 impl ValidateInstruction for NopOperation {
     // type Output = [ValueType; 0];
     fn validate(&self, _: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
@@ -1106,6 +1507,7 @@ impl ValidateInstruction for NopOperation {
     }
 }
 
+#[derive(Clone)]
 pub struct UnreachableOperation;
 impl ValidateInstruction for UnreachableOperation {
     // type Output = Vec<ValueType>;
@@ -1119,9 +1521,31 @@ impl ValidateInstruction for UnreachableOperation {
 }
 
 // block _blocktype_ _instr_* end
+#[derive(Clone, Default)]
 pub struct BlockOperation {
+    id: Option<String>,
     ty: BlockType,
-    instructions: InstructionSequence,
+    // instructions: InstructionSequence,
+    op: Box<Opcode>,
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BlockOperation {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        if tokens.peek().copied().expect_right_paren().is_ok() {
+            return Ok(BlockOperation::default());
+        }
+        // Copied from FunctionDefinition
+        let id = get_id(tokens);
+        if tokens.peek().copied().expect_right_paren().is_ok() {
+            return Ok(BlockOperation {
+                id,
+                ..Default::default()
+            });
+        }
+
+        let ty = BlockType::parse(tokens)?;
+        let op = Box::new(Opcode::parse(tokens)?);
+        Ok(Self { id, ty, op })
+    }
 }
 impl ValidateInstruction for BlockOperation {
     // type Output = Vec<ValueType>;
@@ -1132,18 +1556,19 @@ impl ValidateInstruction for BlockOperation {
         // Prepend return value to this to ctx.labels (aka, this points at ctx.get_labels(0))
         ctx.prepend_label(ty.output().clone());
         // TODO(Alec): Validate how to execute instructions
-        let output = self.instructions.validate(ctx, inputs)?;
+        todo!("implement instructions for a given opcode for a block");
+        // let output = self.instructions.validate(ctx, inputs)?;
         // remove the label
-        let label = ctx.remove_prepend_label()?;
-        // validate the output matches the function output
-        if *ty.output() == label && *ty.output().values() == output {
-            // This should never trigger
-            for input_ty in ty.input().values() {
-                let _ = inputs.pop()?.try_into_value_type(&input_ty)?;
-            }
-            return Ok(ty.output().clone().values().to_vec());
-        }
-        Err(ValidationError::new())
+        // let label = ctx.remove_prepend_label()?;
+        // // validate the output matches the function output
+        // if *ty.output() == label && *ty.output().values() == output {
+        //     // This should never trigger
+        //     for input_ty in ty.input().values() {
+        //         let _ = inputs.pop()?.try_into_value_type(&input_ty)?;
+        //     }
+        //     return Ok(ty.output().clone().values().to_vec());
+        // }
+        // Err(ValidationError::new())
     }
 }
 
@@ -1302,14 +1727,24 @@ impl ValidateInstruction for ReturnOperation {
     }
 }
 
+#[derive(Clone)]
 pub struct CallOperation {
-    function: FunctionIndex,
+    index: Index,
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for CallOperation {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        let index = if let Some(id) = get_id(tokens) {
+            Index::Id(id)
+        } else {
+            Index::Index(read_u32(tokens.next().expect_number()?)?)
+        };
+        Ok(Self { index })
+    }
 }
 impl ValidateInstruction for CallOperation {
     // type Output = Vec<ValueType>;
-
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let func = ctx.get_function(self.function)?;
+        let func = ctx.get_function(&self.index)?;
         // validate function input arguments
         for ty in func.input().values() {
             let _ = inputs.pop()?.try_into_value_type(&ty)?;
@@ -1327,16 +1762,17 @@ impl ValidateInstruction for CallIndirectOperation {
     // type Output = Vec<ValueType>;
 
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let table = ctx.get_table(self.table)?;
-        // validate reference type is func ref
-        table.ref_type().try_into_func_ref()?;
-        // type ty must be defined
-        let ty = ctx.get_type(self.ty)?;
-        // validate the function
-        let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
-        for input_ty in ty.input().values() {
-            let _ = inputs.pop()?.try_into_value_type(&input_ty)?;
-        }
-        Ok(ty.output().values().to_vec())
+        todo!("Alec fix call indirect operation index call")
+        // let table = ctx.get_table(self.table)?;
+        // // validate reference type is func ref
+        // table.ref_type().try_into_func_ref()?;
+        // // type ty must be defined
+        // let ty = ctx.get_type(self.ty)?;
+        // // validate the function
+        // let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
+        // for input_ty in ty.input().values() {
+        //     let _ = inputs.pop()?.try_into_value_type(&input_ty)?;
+        // }
+        // Ok(ty.output().values().to_vec())
     }
 }

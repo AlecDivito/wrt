@@ -6,7 +6,9 @@ use crate::{
         ast::{read_u32, Error, Expect, Parse, TryGet},
         tokenize, Keyword, Token,
     },
-    validation::{Context, Input, ValidateInstruction, Validation, ValidationError},
+    validation::{
+        instruction::Opcode, Context, Input, ValidateInstruction, Validation, ValidationError,
+    },
 };
 
 use super::module::{get_id, get_index, get_next_keyword, Module};
@@ -28,27 +30,48 @@ pub enum HalfType {
     High,
 }
 
+#[derive(Clone)]
 pub enum BlockType {
-    Index(TypeIndex),
-    Value(Option<ValueType>),
+    Index(Index),
+    Value(Option<FunctionType>),
 }
-
+impl Default for BlockType {
+    fn default() -> Self {
+        Self::Value(None)
+    }
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BlockType {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        if Some(Keyword::Type) == get_next_keyword(tokens) {
+            return Ok(BlockType::Index(TypeUse::parse(tokens)?.0));
+        }
+        let mut params = vec![];
+        while Some(Keyword::Param) == get_next_keyword(tokens) {
+            params.extend(FuncParam::parse(tokens)?.var);
+        }
+        let mut results = vec![];
+        while Some(Keyword::Result) == get_next_keyword(tokens) {
+            results.extend(FuncResult::parse(tokens)?.0);
+        }
+        Ok(BlockType::Value(Some(FunctionType::new(
+            ResultType::new(params),
+            ResultType::new(results),
+        ))))
+    }
+}
 impl BlockType {
     pub fn get_function_type(&self, ctx: &Context) -> Result<FunctionType, ValidationError> {
         match self {
-            BlockType::Index(index) => ctx.get_type(*index).cloned(),
-            BlockType::Value(Some(value)) => {
-                Ok(FunctionType::anonymous(Variable::unset(value.clone())))
-            }
+            BlockType::Index(index) => ctx.get_type(index).cloned(),
+            BlockType::Value(Some(value)) => Ok(value.clone()),
             BlockType::Value(None) => Ok(FunctionType::empty()),
         }
     }
 }
-
 impl Validation<FunctionType> for BlockType {
     fn validate(&self, ctx: &Context, _: FunctionType) -> Result<(), ValidationError> {
         match self {
-            BlockType::Index(index) => ctx.get_type(*index).map(|_| ()),
+            BlockType::Index(index) => ctx.get_type(index).map(|_| ()),
             // This one is always ok, because the type is defined on the block type
             // already meaning that if we have parsed it, it's valid...
             // short hand for function type [] -> [ValueType?]
@@ -422,19 +445,10 @@ impl Validation<FunctionType> for FunctionType {
 
 /// ["ResultType"] contains the return values from exiting instructions or calling
 /// a function. Its a sequence of values
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ResultType {
     values: Vec<Variable>,
 }
-
-impl Default for ResultType {
-    fn default() -> Self {
-        Self {
-            values: Default::default(),
-        }
-    }
-}
-
 impl ResultType {
     pub fn new(values: Vec<Variable>) -> Self {
         Self { values }
@@ -463,6 +477,13 @@ impl ResultType {
 pub struct FuncParam {
     var: Vec<Variable>,
 }
+impl Default for FuncParam {
+    fn default() -> Self {
+        Self {
+            var: Default::default(),
+        }
+    }
+}
 impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for FuncParam {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
         tokens.next().expect_left_paren()?;
@@ -471,14 +492,14 @@ impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for FuncParam {
             Some(id) => vec![Variable::new(id, ValueType::parse(tokens)?)],
             None => {
                 let mut tys = vec![];
-                while !tokens.peek().copied().expect_right_paren().is_ok() {
+                while tokens.peek().copied().expect_right_paren().is_err() {
                     tys.push(Variable::unset(ValueType::parse(tokens)?));
                 }
                 tys
             }
         };
         tokens.next().expect_right_paren()?;
-        return Ok(Self { var });
+        Ok(Self { var })
     }
 }
 
@@ -493,28 +514,61 @@ impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for LocalParam {
             Some(id) => vec![Variable::new(id, ValueType::parse(tokens)?)],
             None => {
                 let mut tys = vec![];
-                while !tokens.peek().copied().expect_right_paren().is_ok() {
+                while tokens.peek().copied().expect_right_paren().is_err() {
                     tys.push(Variable::unset(ValueType::parse(tokens)?));
                 }
                 tys
             }
         };
         tokens.next().expect_right_paren()?;
-        return Ok(Self { var });
+        Ok(Self { var })
     }
 }
 
+#[derive(Default)]
 pub struct FuncResult(pub Vec<Variable>);
 impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for FuncResult {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
         tokens.next().expect_left_paren()?;
         tokens.next().expect_keyword_token(Keyword::Result)?;
         let mut values = vec![];
-        while !tokens.peek().copied().expect_right_paren().is_ok() {
+        while tokens.peek().copied().expect_right_paren().is_err() {
             values.push(Variable::unset(ValueType::parse(tokens)?));
         }
         tokens.next().expect_right_paren()?;
-        return Ok(FuncResult(values));
+        Ok(FuncResult(values))
+    }
+}
+
+#[derive(Default)]
+pub struct TypeDefinition {
+    id: Option<String>,
+    params: FuncParam,
+    result: FuncResult,
+}
+
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for TypeDefinition {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        let mut this = Self::default();
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::Type)?;
+        this.id = get_id(tokens);
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::Func)?;
+
+        while Some(Keyword::Param) == get_next_keyword(tokens) {
+            this.params.var.extend(FuncParam::parse(tokens)?.var);
+        }
+        while Some(Keyword::Result) == get_next_keyword(tokens) {
+            this.result.0.extend(FuncResult::parse(tokens)?.0);
+        }
+
+        // For `func`
+        tokens.next().expect_right_paren()?;
+
+        // For `type`
+        tokens.next().expect_right_paren()?;
+        Ok(this)
     }
 }
 
@@ -699,6 +753,14 @@ pub enum IntType {
 pub enum FloatType {
     F32,
     F64,
+}
+impl From<FloatType> for NumType {
+    fn from(val: FloatType) -> Self {
+        match val {
+            FloatType::F32 => NumType::F32,
+            FloatType::F64 => NumType::F64,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -979,10 +1041,17 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for UseMemory {
     }
 }
 
-pub struct Instruction();
+#[derive(Default, Clone)]
+pub struct Instruction {
+    instructions: Vec<Opcode>,
+}
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Instruction {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
-        todo!("Parse instruction {:?}", tokens.next())
+        let mut instructions = vec![];
+        while tokens.peek().copied().expect_left_paren().is_ok() {
+            instructions.push(Opcode::parse(tokens)?)
+        }
+        Ok(Instruction { instructions })
     }
 }
 
@@ -1262,41 +1331,7 @@ pub struct FunctionDefinition {
     // locals l
     locals: Vec<Variable>,
     // instructions
-    instructions: Vec<()>,
-}
-
-impl FunctionDefinition {
-    // Function loop completed. Add everything parsed to the module
-    // let ty = match func_ty {
-    //     Some(ty) if params.is_empty() && result.is_empty() => ty.clone(),
-    //     Some(ty)
-    //         if ty.input().values() == params.values()
-    //             && ty.output().values() == result.values() =>
-    //     {
-    //         ty.clone()
-    //     }
-    //     None => FunctionType::new(params, result),
-    //     Some(ty) => {
-    //         return Err(Error::new(
-    //             None,
-    //             "function type and parameters do not match",
-    //         ))
-    //     }
-    // };
-
-    // let expression = Expression::new(instructions);
-    // // this.types.push(None, FunctionType::new(params, result));
-    // // let ty_index = (this.types.len() - 1).try_into().unwrap();
-    // this.functions.push(Function::new(
-    //     FnType::Coded(Box::new(ty)),
-    //     locals,
-    //     expression,
-    // ));
-    // if let Some(name) = export {
-    //     let index = (this.functions.len() - 1).try_into().unwrap();
-    //     this.export
-    //         .push(Export::new(name.name, ExportDescription::Func(index)))
-    // }
+    instructions: Instruction,
 }
 
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for FunctionDefinition {
@@ -1329,9 +1364,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for FunctionDefinit
             this.locals.extend(LocalParam::parse(tokens)?.var);
         }
 
-        // parse instructions
-
-        todo!("Parse instructions alec...");
+        this.instructions = Instruction::parse(tokens)?;
 
         tokens.next().expect_right_paren()?;
         Ok(this)

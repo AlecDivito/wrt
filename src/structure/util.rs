@@ -1,4 +1,4 @@
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct IndexedVec<V> {
     list: Vec<(Option<String>, V)>,
 }

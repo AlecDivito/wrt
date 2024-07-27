@@ -51,7 +51,7 @@ use crate::{
         Keyword, Token,
     },
     structure::types::{
-        FunctionIndex, FunctionType, GlobalType, MemoryType, RefType, ResultType, TableType,
+        FunctionIndex, FunctionType, GlobalType, Index, MemoryType, RefType, ResultType, TableType,
         ValueType,
     },
 };
@@ -83,14 +83,20 @@ pub struct Context {
 }
 
 impl Context {
-    pub fn get_type(&self, index: u32) -> Result<&FunctionType, ValidationError> {
-        let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
-        self.types.get(index).ok_or_else(ValidationError::new)
+    pub fn get_type(&self, index: &Index) -> Result<&FunctionType, ValidationError> {
+        todo!("Implement getting type from Index which is their id or number");
+        // let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
+        // self.types.get(index).ok_or_else(ValidationError::new)
     }
 
-    pub fn get_function(&self, index: u32) -> Result<&FunctionType, ValidationError> {
-        let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
-        self.functions.get(index).ok_or_else(ValidationError::new)
+    pub fn get_function(&self, _index: &Index) -> Result<&FunctionType, ValidationError> {
+        todo!("Implement getting functions by their index");
+        // match index {
+        //     Index::Id(id) => todo!(),
+        //     Index::Index(_) => todo!(),
+        // }
+        // let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
+        // self.functions.get(index).ok_or_else(ValidationError::new)
     }
 
     pub fn get_element(&self, index: u32) -> Result<&RefType, ValidationError> {

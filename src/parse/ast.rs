@@ -4,7 +4,7 @@ use crate::{
     execution::Number,
     structure::{
         module::Module,
-        types::{AssertInvalid, AssertMalformed, NumType, SignType},
+        types::{AssertInvalid, AssertMalformed, NumType},
     },
 };
 
@@ -200,8 +200,8 @@ pub fn read_number(expected: NumType, token: &Token) -> Result<Number, Error> {
     Ok(match expected {
         NumType::I32 => Number::I32(read_u32(token)?.try_into().unwrap()),
         NumType::I64 => Number::I64(read_u64(token)?.try_into().unwrap()),
-        NumType::F32 => todo!(),
-        NumType::F64 => todo!(),
+        NumType::F32 => Number::F32(read_f32(token)?),
+        NumType::F64 => Number::F64(read_f64(token)?),
     })
 }
 
@@ -231,11 +231,25 @@ pub fn read_u64(token: &Token) -> Result<u64, Error> {
     Ok(number)
 }
 
+pub fn read_f32(token: &Token) -> Result<f32, Error> {
+    token
+        .source
+        .parse::<f32>()
+        .map_err(|err| Error::new(Some(token.clone()), format!("Error parsing f32: {:?}", err)))
+}
+
+pub fn read_f64(token: &Token) -> Result<f64, Error> {
+    token
+        .source
+        .parse::<f64>()
+        .map_err(|err| Error::new(Some(token.clone()), format!("Error parsing f64: {:?}", err)))
+}
+
 pub fn parse_module_test<'a, I: Iterator<Item = &'a Token> + Clone>(
     tokens: &mut Peekable<I>,
 ) -> Result<(), Error> {
     let mut peek_iter = tokens.clone();
-    let _ = peek_iter.next().expect_left_paren()?;
+    peek_iter.next().expect_left_paren()?;
     let keyword = peek_iter.next().expect_keyword()?;
 
     match keyword {

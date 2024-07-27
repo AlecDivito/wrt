@@ -963,7 +963,7 @@ impl FromStr for Keyword {
             str if str.starts_with("offset=") =>  {
                 let amount = match str.split('=').nth(1) {
                     Some(amount) => amount,
-                    NOne => {
+                    None => {
                         return Err(ParseError::new(format!("Parsing `offset` of memory args was determine to be not be a number. Failed to parse {}", str)))
                     },
                 };

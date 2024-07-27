@@ -5,6 +5,8 @@
 //! In addition, some instructions have static _immediate arguments_. Typically
 //! Indices or Type annotations.
 
+use std::str::FromStr;
+
 use super::types::ValueType;
 
 /// [StackType]s are like [FunctionType]s. Except, thye allow individual operands
