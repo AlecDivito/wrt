@@ -1,9 +1,12 @@
 use std::{fs, iter::Peekable, os::unix::ffi::OsStrExt, path::PathBuf};
 
 use clap::{Parser, Subcommand};
-use wrt::parse::{
-    ast::{parse_module_test, parse_module_test_2, print_tee, Expect},
-    tokenize, Token,
+use wrt::{
+    parse::{
+        ast::{parse_module_test, parse_module_test_2, walk_tee, Expect},
+        tokenize, Token,
+    },
+    structure::module::Module,
 };
 
 #[derive(Parser)]
@@ -136,15 +139,46 @@ impl Options {
         };
 
         let mut iter = tokens.iter().peekable();
+        let mut last_parsed_module: Option<Module> = None;
         // while iter.peek().is_some() {
         //     let tee = parse_module_test_2(&mut iter).unwrap();
-        //     print_tee(&tee);
-        //     println!("---")
+        //     println!("{}", tee);
+        //     println!("---");
+        // match walk_tee(&tee, last_parsed_module.as_ref()) {
+        //     Ok(Some(module)) => {
+        //         last_parsed_module = Some(module);
+        //         println!("Module parsed successfully...");
+        //     }
+        //     Ok(None) => println!("Passed Test..."),
+        //     Err(err) => {
+        //         let range = if let Some(token) = &err.token() {
+        //             if let Some(index) = tokens.iter().position(|t| t == *token) {
+        //                 if index == 0 {
+        //                     tokens.get(0..=5).unwrap().to_vec()
+        //                 } else {
+        //                     tokens.get(index - 2..=index + 2).unwrap().to_vec()
+        //                 }
+        //             } else {
+        //                 vec![]
+        //             }
+        //         } else {
+        //             vec![]
+        //         };
+
+        //         println!("ERROR");
+        //         println!("========================================");
+        //         println!("{:?}", range);
+        //         let tokens = range.iter().map(|t| t.source()).collect::<Vec<_>>();
+        //         println!("Tokens around error: {:?}", tokens);
+        //         println!("Parsing encounted error {:?}", err);
+        //         return Ok(());
+        //     }
         // }
-        let mut last_parsed_module = None;
+        // }
         while iter.peek().is_some() {
             match parse_module_test(&mut iter, last_parsed_module.as_ref()) {
                 Ok(Some(module)) => {
+                    println!("{}", module);
                     last_parsed_module = Some(module);
                     println!("Module parsed successfully...");
                 }

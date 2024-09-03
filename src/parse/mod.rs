@@ -376,6 +376,8 @@ pub enum Keyword {
     Output,
 }
 
+// impl Visit for Keyword {}
+
 impl Keyword {
     /// Expect no input parameters and one return type that must be of I32.
     pub fn has_unary_return_ty_i32(&self) -> bool {

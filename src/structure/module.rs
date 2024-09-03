@@ -1,5 +1,5 @@
 use crate::parse::{
-    ast::{read_u32, Error, Expect, TryGet},
+    ast::{read_u32, Error, Expect, Tee, TryGet, Visit},
     Keyword, TokenType,
 };
 use std::{collections::HashSet, iter::Peekable};
@@ -434,6 +434,19 @@ pub struct Module {
     start: Option<StartOpts>,
 }
 
+impl std::fmt::Display for Module {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "(module")?;
+        for func in &self.functions {
+            f.pad(&" ".repeat(2))?;
+            writeln!(f, "{}", func)?;
+        }
+        f.pad("")?;
+        writeln!(f, ")")?;
+        Ok(())
+    }
+}
+
 impl Default for Module {
     fn default() -> Self {
         Self {
@@ -474,6 +487,68 @@ pub fn get_next_keyword<'a, I: Iterator<Item = &'a Token> + Clone>(
     tokens.peek().copied().expect_left_paren().ok()?;
     let keyword = tokens.clone().nth(1).expect_keyword().ok()?;
     Some(keyword)
+}
+
+impl Visit for Module {
+    fn visit(tee: &Tee) -> Result<Self, Error> {
+        let mut this = Module::default();
+        tee.expect_keyword(Keyword::Module)?;
+
+        for child in tee.children() {
+            // match child.root() {
+            //     Keyword::Type => this.types.push(TypeDefinition::parse(tokens)?),
+            //     Keyword::Func => this.functions.push(FunctionDefinition::parse(tokens)?),
+            //     Keyword::Table => {
+            //         tokens.next().expect_left_paren()?;
+            //         tokens.next().expect_keyword_token(Keyword::Table)?;
+            //         let id = get_id(tokens);
+            //     }
+            //     Keyword::Memory => this.memories.push(MemoryOpts::parse(tokens)?),
+            //     Keyword::Global => {
+            //         tokens.next().expect_left_paren()?;
+            //         tokens.next().expect_keyword_token(Keyword::Global)?;
+            //         let id = get_id(tokens);
+            //     }
+            //     Keyword::Elem => {
+            //         tokens.next().expect_left_paren()?;
+            //         tokens.next().expect_keyword_token(Keyword::Elem)?;
+            //     }
+            //     Keyword::Data => {
+            //         tokens.next().expect_left_paren()?;
+            //         tokens.next().expect_keyword_token(Keyword::Data)?;
+            //     }
+            //     Keyword::Import => {
+            //         tokens.next().expect_left_paren()?;
+            //         tokens.next().expect_keyword_token(Keyword::Import)?;
+            //     }
+            //     Keyword::Export => {
+            //         tokens.next().expect_left_paren()?;
+            //         tokens.next().expect_keyword_token(Keyword::Export)?;
+            //     }
+            //     Keyword::Start => {
+            //         // TODO(Alec): This maybe a feature we want for our own modules.
+            //         // Having multiple start functions just means we'll call them
+            //         // as we see them.
+            //         if this.start.is_some() {
+            //             panic!("Only one start function can exist in a module")
+            //         }
+            //         this.start = Some(StartOpts::parse(tokens)?)
+            //     }
+            //     keyword => {
+            //         tokens.next().expect_left_paren()?;
+            //         return Err(Error::new(
+            //             tokens.next().cloned(),
+            //             format!(
+            //                 "Expected top level module import. Got {:?} instead.",
+            //                 keyword
+            //             ),
+            //         ));
+            //     }
+            // }
+        }
+
+        Ok(this)
+    }
 }
 
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Module {

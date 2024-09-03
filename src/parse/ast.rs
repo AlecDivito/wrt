@@ -1,4 +1,9 @@
-use std::{convert::TryInto, iter::Peekable, string::ParseError};
+use std::{
+    convert::TryInto,
+    fmt::{self, Display, Formatter},
+    iter::Peekable,
+    string::ParseError,
+};
 
 use crate::{
     execution::Number,
@@ -12,6 +17,10 @@ use super::{Keyword, Token, TokenType};
 
 pub trait Parse<'a, I: Iterator<Item = &'a Token>>: Sized {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, Error>;
+}
+
+pub trait Visit: Sized {
+    fn visit(tee: &Tee) -> Result<Self, Error>;
 }
 
 #[derive(Debug)]
@@ -291,6 +300,65 @@ pub struct Tee {
     right_attributes: Vec<Token>,
 }
 
+impl Tee {
+    pub fn find_all_attributes(&self, ty: TokenType) -> Vec<&Token> {
+        let mut tokens = vec![];
+        for attr in self.left_attributes.iter() {
+            if attr.ty == ty {
+                tokens.push(attr)
+            }
+        }
+        tokens
+    }
+
+    fn find_attribute(&self, ty: TokenType) -> Option<&Token> {
+        self.left_attributes.iter().find(|&attr| attr.ty == ty)
+    }
+
+    // pub fn find_parameters(&self) ->
+
+    // pub fn find_id(&self) -> Option<String> {
+    //     self.find_attribute(TokenType::Id).map(|t| t.source.clone())
+    // }
+
+    pub fn expect_keyword(&self, ty: Keyword) -> Result<(), Error> {
+        if self.root == ty {
+            Ok(())
+        } else {
+            Err(Error::new(None, format!("Expected keyword {:?}", ty)))
+        }
+    }
+
+    pub fn children(&self) -> &[Tee] {
+        &self.children
+    }
+
+    pub fn root(&self) -> &Keyword {
+        &self.root
+    }
+}
+
+pub fn walk_tee(tee: &Tee, passed: Option<&Module>) -> Result<Option<Module>, Error> {
+    let mut module = None;
+    match tee.root() {
+        Keyword::Module => {
+            module = Some(Module::visit(tee)?);
+        }
+        // Keyword::AssertMalformed => AssertMalformed::visit(tee)?.test()?,
+        // Keyword::AssertInvalid => AssertInvalid::visit(tee)?.test()?,
+        // Keyword::AssertReturn if passed.is_some() => {
+        //     AssertReturn::visit(tee)?.test(passed.as_ref().unwrap())?
+        // }
+        keyword => {
+            return Err(Error::new(
+                None,
+                format!("{keyword:?} was not expected as a top level directive in .wast files"),
+            ))
+        }
+    };
+    Ok(module)
+}
+
 pub fn parse_module_test_2<'a, I: Iterator<Item = &'a Token> + Clone>(
     tokens: &mut Peekable<I>,
 ) -> Result<Tee, Error> {
@@ -324,28 +392,36 @@ pub fn parse_module_test_2<'a, I: Iterator<Item = &'a Token> + Clone>(
     })
 }
 
-pub fn print_tee(tee: &Tee) {
-    print_tee_with_indentation(tee, 0);
+impl Display for Tee {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        print_tee_with_indentation(f, self, 0)
+    }
 }
 
-fn print_tee_with_indentation(tee: &Tee, indent: usize) {
-    print!("{}", " ".repeat(indent));
-    print!("({:?}", tee.root);
+fn print_tee_with_indentation(f: &mut Formatter<'_>, tee: &Tee, indent: usize) -> fmt::Result {
+    write!(f, "{}", " ".repeat(indent))?;
+    write!(f, "(key:{:?}", tee.root)?;
     for attr in &tee.left_attributes {
-        print!(" {}", attr.source);
+        write!(f, " left:{}", attr.source)?;
     }
     if !tee.children.is_empty() {
-        println!();
+        writeln!(f, "\n{}children:", " ".repeat(indent))?;
         for children in &tee.children {
-            print_tee_with_indentation(children, indent + 1)
+            print_tee_with_indentation(f, children, indent + 1)?;
         }
     }
     for attr in &tee.right_attributes {
-        print!(" {}", attr.source);
+        match attr.ty {
+            TokenType::String => write!(f, " right:\"{}\"", attr.source)?,
+            TokenType::Id => write!(f, " right:${}", attr.source)?,
+            TokenType::Reserved => todo!(),
+            _ => write!(f, " right:{}", attr.source)?,
+        }
     }
     if tee.children.is_empty() {
-        println!(") ");
+        writeln!(f, ") ")?;
     } else {
-        println!("{})", " ".repeat(indent));
+        writeln!(f, "{})", " ".repeat(indent))?;
     }
+    Ok(())
 }

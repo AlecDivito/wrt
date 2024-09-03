@@ -3,7 +3,7 @@ use std::{default, fmt::Display, iter::Peekable};
 use crate::{
     execution::{ModuleInstance, Store, PAGE_SIZE},
     parse::{
-        ast::{read_u32, Error, Expect, Parse, TryGet},
+        ast::{read_u32, Error, Expect, Parse, Tee, TryGet, Visit},
         tokenize, Keyword, Token,
     },
     validation::{
@@ -102,6 +102,15 @@ pub struct Variable {
     ty: ValueType,
 }
 
+impl std::fmt::Display for Variable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.id {
+            Some(id) => write!(f, "${} {}", id, self.ty),
+            None => write!(f, "{}", self.ty),
+        }
+    }
+}
+
 impl Variable {
     pub fn new(id: String, ty: ValueType) -> Self {
         Self { id: Some(id), ty }
@@ -124,6 +133,14 @@ impl Variable {
 pub enum Index {
     Id(String),
     Index(u32),
+}
+impl std::fmt::Display for Index {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Index::Id(id) => write!(f, "${}", id),
+            Index::Index(idx) => write!(f, "{}", idx),
+        }
+    }
 }
 
 impl Default for Index {
@@ -473,9 +490,18 @@ impl Validation<FunctionType> for FunctionType {
 pub struct ResultType {
     values: Vec<Variable>,
 }
+impl std::fmt::Display for ResultType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!()
+    }
+}
 impl ResultType {
     pub fn new(values: Vec<Variable>) -> Self {
         Self { values }
+    }
+
+    pub fn as_ref(&self) -> &[Variable] {
+        &self.values
     }
 
     pub fn values(&self) -> Vec<ValueType> {
@@ -589,6 +615,14 @@ impl TypeDefinition {
         FunctionType::new(self.params.ty(), self.result.ty())
     }
 }
+
+// impl Visit for TypeDefinition {
+//     fn visit(tee: &Tee) -> Result<Self, Error> {
+//         let mut this = Self::default();
+//         this.id = tee.find_id();
+//     }
+// }
+
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for TypeDefinition {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
         let mut this = Self::default();
@@ -626,6 +660,15 @@ pub enum ValueType {
     Num(NumType),
     VecType(VecType),
     RefType(RefType),
+}
+impl std::fmt::Display for ValueType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ValueType::Num(num) => write!(f, "{}", num),
+            ValueType::VecType(num) => write!(f, "{}", num),
+            ValueType::RefType(num) => write!(f, "{}", num),
+        }
+    }
 }
 impl Default for ValueType {
     fn default() -> Self {
@@ -718,6 +761,11 @@ pub enum RefType {
     // This is a type of pointer.
     ExternRef(ExternRef),
 }
+impl std::fmt::Display for RefType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!()
+    }
+}
 impl Default for RefType {
     fn default() -> Self {
         Self::ExternRef(ExternRef::default())
@@ -741,6 +789,11 @@ impl RefType {
 /// be observed. Values of vector type can be stored in memory
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VecType;
+impl std::fmt::Display for VecType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "v128")
+    }
+}
 // TODO(Alec): Implement all the permutations of VecType. Because the value
 // is "transparent"
 
@@ -1018,6 +1071,12 @@ pub struct RelativeExport {
     pub name: String,
 }
 
+impl std::fmt::Display for RelativeExport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(export {})", self.name)
+    }
+}
+
 impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for RelativeExport {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
         tokens.next().expect_left_paren()?;
@@ -1032,6 +1091,12 @@ impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for RelativeExport {
 pub struct RelativeImport {
     module: String,
     name: String,
+}
+
+impl std::fmt::Display for RelativeImport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(import {} {})", self.module, self.name)
+    }
 }
 
 impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for RelativeImport {
@@ -1050,6 +1115,11 @@ pub struct TypeUse(Index);
 impl TypeUse {
     pub fn index(&self) -> &Index {
         &self.0
+    }
+}
+impl std::fmt::Display for TypeUse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(type {})", self.0)
     }
 }
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for TypeUse {
@@ -1100,6 +1170,11 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for UseMemory {
 #[derive(Default, Clone)]
 pub struct Instruction {
     instructions: Vec<Opcode>,
+}
+impl std::fmt::Display for Instruction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!()
+    }
 }
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Instruction {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
@@ -1465,6 +1540,38 @@ pub struct FunctionDefinition {
     locals: Vec<Variable>,
     // instructions
     instructions: Instruction,
+}
+
+impl std::fmt::Display for FunctionDefinition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(func")?;
+        if let Some(id) = self.id.as_ref() {
+            write!(f, " ${}", id)?;
+        }
+        if let Some(import) = self.import.as_ref() {
+            write!(f, " {}", import)?;
+        }
+        if let Some(export) = self.export.as_ref() {
+            write!(f, " {}", export)?;
+        }
+        if let Some(ty) = self.ty.as_ref() {
+            write!(f, " {}", ty)?;
+        } else {
+            for var in self.params.as_ref() {
+                write!(f, " (param {})", var)?;
+            }
+            for var in self.result.as_ref() {
+                write!(f, " (result {})", var)?;
+            }
+        }
+        for local in self.locals.iter() {
+            write!(f, " (local {})", local)?;
+        }
+        f.pad(&" ".repeat(4))?;
+        writeln!(f, "{}", self.instructions)?;
+        write!(f, ")")?;
+        Ok(())
+    }
 }
 
 impl FunctionDefinition {
