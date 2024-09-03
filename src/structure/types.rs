@@ -7,7 +7,7 @@ use crate::{
         tokenize, Keyword, Token,
     },
     validation::{
-        instruction::{Const, Execute, Opcode},
+        instruction::{Const, Execute, Operation},
         Context, Input, ValidateInstruction, ValidateResult, Validation, ValidationError,
     },
 };
@@ -62,9 +62,9 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BlockType {
             return Ok(BlockType::Index(TypeUse::parse(tokens)?.0));
         }
         let mut params = vec![];
-        while Some(Keyword::Param) == get_next_keyword(tokens) {
-            params.extend(FuncParam::parse(tokens)?.var);
-        }
+        // while Some(Keyword::Param) == get_next_keyword(tokens) {
+        //     params.extend(FuncParam::parse(tokens)?.var);
+        // }
         let mut results = vec![];
         while Some(Keyword::Result) == get_next_keyword(tokens) {
             results.extend(FuncResult::parse(tokens)?.0);
@@ -845,6 +845,16 @@ pub enum NumType {
     F32,
     F64,
 }
+impl std::fmt::Display for NumType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NumType::I32 => write!(f, "i32"),
+            NumType::I64 => write!(f, "i64"),
+            NumType::F32 => write!(f, "f32"),
+            NumType::F64 => write!(f, "f64"),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IntType {
@@ -1054,18 +1064,6 @@ impl NumType {
 //     }
 // }
 
-impl Display for NumType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let content = match self {
-            NumType::I32 => "i32",
-            NumType::I64 => "i64",
-            NumType::F32 => "f32",
-            NumType::F64 => "f64",
-        };
-        write!(f, "{}", content)
-    }
-}
-
 #[derive(Default, Clone)]
 pub struct RelativeExport {
     pub name: String,
@@ -1169,18 +1167,30 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for UseMemory {
 
 #[derive(Default, Clone)]
 pub struct Instruction {
-    instructions: Vec<Opcode>,
+    instructions: Vec<Operation>,
 }
 impl std::fmt::Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        for instr in self.instructions.iter() {
+            f.pad(&" ".repeat(4))?;
+            writeln!(f, "{}", instr)?;
+        }
+        Ok(())
     }
 }
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Instruction {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
         let mut instructions = vec![];
         while tokens.peek().copied().expect_left_paren().is_ok() {
-            instructions.push(Opcode::parse(tokens)?)
+            tokens.next().expect_left_paren()?;
+            let op = Operation::parse(tokens)?;
+            // If the instructions are written in S-Expression, process this first
+            while tokens.peek().copied().expect_left_paren().is_ok() {
+                let instr = Instruction::parse(tokens)?;
+                instructions.extend(instr.instructions);
+            }
+            instructions.push(op);
+            tokens.next().expect_right_paren()?;
         }
         Ok(Instruction { instructions })
     }
@@ -1191,6 +1201,11 @@ impl ValidateInstruction for Instruction {
             expr.validate(ctx, inputs)?;
         }
         Ok(vec![])
+    }
+}
+impl Instruction {
+    pub fn is_empty(&self) -> bool {
+        self.instructions.is_empty()
     }
 }
 
@@ -1567,9 +1582,14 @@ impl std::fmt::Display for FunctionDefinition {
         for local in self.locals.iter() {
             write!(f, " (local {})", local)?;
         }
-        f.pad(&" ".repeat(4))?;
-        writeln!(f, "{}", self.instructions)?;
-        write!(f, ")")?;
+        if self.instructions.is_empty() {
+            write!(f, ")")?;
+        } else {
+            writeln!(f)?;
+            write!(f, "{}", self.instructions)?;
+            f.pad(&" ".repeat(2))?;
+            write!(f, ")")?;
+        }
         Ok(())
     }
 }

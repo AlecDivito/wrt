@@ -10,20 +10,18 @@ use crate::{
         module::{get_id, get_next_keyword},
         types::{
             BlockType, DataIndex, ElementIndex, FloatVectorShape, FuncResult, FunctionIndex,
-            FunctionReference, GlobalType, HalfType, Index, IntType, IntegerVectorShape,
-            LabelIndex, LocalIndex, MemoryArgument, MemoryIndex, MemoryLoadNumber, MemoryWidth,
-            MemoryZeroWidth, NumType, RefType, SignType, TableIndex, TypeIndex, ValueType, VecType,
-            VectorMemoryOp, VectorShape,
+            FunctionReference, GlobalType, HalfType, Index, Instruction, IntType,
+            IntegerVectorShape, LabelIndex, LocalIndex, MemoryArgument, MemoryIndex,
+            MemoryLoadNumber, MemoryWidth, MemoryZeroWidth, NumType, RefType, SignType, TableIndex,
+            TypeIndex, ValueType, VecType, VectorMemoryOp, VectorShape,
         },
     },
 };
 
-use super::{
-    Context, Input, InstructionSequence, ValidateInstruction, ValidateResult, ValidationError,
-};
+use super::{Context, Input, ValidateInstruction, ValidateResult, ValidationError};
 
 #[derive(Clone)]
-enum Operation {
+pub enum Operation {
     Const(Const),
     Nop(NopOperation),
     GlobalGet(GlobalGetOperation),
@@ -81,22 +79,60 @@ impl ValidateInstruction for Operation {
     }
 }
 
-#[derive(Clone, Default)]
-pub struct Opcode {
-    op: Operation,
-    children: Vec<Opcode>,
+enum Literal {
+    // These also double as constants
+    I32(i32),
+    I64(i64),
+    F32(f32),
+    F64(f64),
 }
-impl ValidateInstruction for Opcode {
-    fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        for expr in &self.children {
-            expr.validate(ctx, inputs)?;
+
+// enum Expression {
+//     Literal(Literal),
+//     Variable(String),
+
+//     UnaryOp(UnaryOperator, Box<Expression>),
+//     BinaryOp(BinaryOperator, Box<Expression>, Box<Expression>),
+//     TestOp(TestOperator, Box<Expression>),
+//     ComparisonOp(CompareOperator, Box<Expression>),
+//     ConvertOp(ConvertOperator, Box<Expression>),
+
+//     FunctionCall(String, Vec<Expression>),
+// }
+
+enum BlockInstruction {
+    Block,
+    If,
+    Loop,
+}
+
+impl std::fmt::Display for Operation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Operation::Const(cst) => write!(f, "{}", cst),
+            Operation::Nop(opt) => write!(f, "{}", opt),
+            Operation::GlobalGet(opt) => write!(f, "{}", opt),
+            Operation::LocalGet(opt) => write!(f, "{}", opt),
+            Operation::Unreachable(opt) => write!(f, "{}", opt),
+            Operation::Drop(opt) => write!(f, "{}", opt),
+            Operation::Select(opt) => write!(f, "{}", opt),
+            Operation::Block(opt) => write!(f, "{}", opt),
+            Operation::Call(opt) => write!(f, "{}", opt),
+            Operation::Loop(opt) => write!(f, "{}", opt),
+            Operation::If(opt) => write!(f, "{}", opt),
+            Operation::Break(opt) => write!(f, "{}", opt),
+            Operation::BreakIf(opt) => write!(f, "{}", opt),
+            Operation::BreakTable(opt) => write!(f, "{}", opt),
+            Operation::Return(opt) => write!(f, "{}", opt),
+            Operation::Test(opt) => write!(f, "{}", opt),
+            Operation::Unary(opt) => write!(f, "{}", opt),
+            Operation::Binary(opt) => write!(f, "{}", opt),
         }
-        self.op.validate(ctx, inputs)
     }
 }
-impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Opcode {
+
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Operation {
     fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
-        tokens.next().expect_left_paren()?;
         let op = match tokens.next().expect_keyword()? {
             Keyword::FuncRef => todo!(),
             Keyword::ExternRef => todo!(),
@@ -359,12 +395,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Opcode {
                 ))
             }
         };
-        let mut children = vec![];
-        while tokens.peek().copied().expect_left_paren().is_ok() {
-            children.push(Opcode::parse(tokens)?);
-        }
-        tokens.next().expect_right_paren()?;
-        Ok(Opcode { op, children })
+        Ok(op)
     }
 }
 
@@ -376,31 +407,16 @@ pub trait Execute {
  * Number Instructions
  */
 
-macro_rules! const_instruction {
-    ($name_ty:ident, $name:ident, $typ:ty) => {
-        pub struct $name_ty($typ);
-        impl ValidateInstruction for $name_ty {
-            // type Output = [ValueType; 1];
-            fn validate(&self, _: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
-                Ok(vec![ValueType::Num(
-                    crate::structure::types::NumType::$name,
-                )])
-            }
-        }
-    };
-}
-
-const_instruction!(ConstI32, I32, i32); // Create ConstI32 type
-const_instruction!(ConstI64, I64, i64); // Create ConstI32 type
-const_instruction!(ConstF32, F32, f32); // Create ConstI32 type
-const_instruction!(ConstF64, F64, f64); // Create ConstI32 type
-
 // Validate Const operations
 #[derive(Clone)]
 pub struct Const {
-    // TODO(Alec): This could just be .value instead.
     ty: NumType,
     value: Number,
+}
+impl std::fmt::Display for Const {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}.const {})", self.ty, self.value)
+    }
 }
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Const {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
@@ -966,7 +982,12 @@ impl ValidateInstruction for VectorShapeExtendAddPairWiseOperation {
  * Parametric Instructions
  */
 #[derive(Clone)]
-pub struct DropOperation;
+pub struct DropOperation {}
+impl std::fmt::Display for DropOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(drop)")
+    }
+}
 impl ValidateInstruction for DropOperation {
     // type Output = [ValueType; 0];
     fn validate(&self, _: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
@@ -983,9 +1004,14 @@ impl ValidateInstruction for DropOperation {
 pub struct SelectOperation {
     t: Option<ValueType>,
 
-    op1: Box<Opcode>,
-    op2: Box<Opcode>,
-    op3: Box<Opcode>,
+    op1: Box<Operation>,
+    op2: Box<Operation>,
+    op3: Box<Operation>,
+}
+impl std::fmt::Display for SelectOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(select {} {} {})", self.op1, self.op2, self.op3)
+    }
 }
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for SelectOperation {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
@@ -1004,9 +1030,9 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for SelectOperation
             None
         };
 
-        let op1 = Box::new(Opcode::parse(tokens)?);
-        let op2 = Box::new(Opcode::parse(tokens)?);
-        let op3 = Box::new(Opcode::parse(tokens)?);
+        let op1 = Box::new(Operation::parse(tokens)?);
+        let op2 = Box::new(Operation::parse(tokens)?);
+        let op3 = Box::new(Operation::parse(tokens)?);
 
         Ok(Self { t, op1, op2, op3 })
     }
@@ -1044,18 +1070,23 @@ impl ValidateInstruction for SelectOperation {
 
 #[derive(Clone)]
 pub struct LocalGetOperation {
-    index: LocalIndex,
+    index: Index,
+}
+impl std::fmt::Display for LocalGetOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(local.get {})", self.index)
+    }
 }
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for LocalGetOperation {
     fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
-        let index = read_u32(tokens.next().expect_number()?)?;
+        let index = Index::Index(read_u32(tokens.next().expect_number()?)?);
         Ok(Self { index })
     }
 }
 impl ValidateInstruction for LocalGetOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let a = *ctx.get_local(&Index::Index(self.index))?;
+        let a = *ctx.get_local(&self.index)?;
         Ok(vec![a])
     }
 }
@@ -1086,18 +1117,23 @@ impl ValidateInstruction for LocalTeeOperation {
 
 #[derive(Clone)]
 pub struct GlobalGetOperation {
-    index: LocalIndex,
+    index: Index,
+}
+impl std::fmt::Display for GlobalGetOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(global.get {})", self.index)
+    }
 }
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for GlobalGetOperation {
     fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
-        let index = read_u32(tokens.next().expect_number()?)?;
+        let index = Index::Index(read_u32(tokens.next().expect_number()?)?);
         Ok(Self { index })
     }
 }
 impl ValidateInstruction for GlobalGetOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let global = ctx.get_global(&Index::Index(self.index))?;
+        let global = ctx.get_global(&self.index)?;
         match global {
             // https://webassembly.github.io/spec/core/valid/instructions.html#xref-syntax-instructions-syntax-instr-variable-mathsf-global-get-x
             // Why can't we get a const?
@@ -1566,6 +1602,11 @@ impl ValidateInstruction for DataDrop {
  */
 #[derive(Clone)]
 pub struct NopOperation;
+impl std::fmt::Display for NopOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(nop)")
+    }
+}
 impl Execute for NopOperation {
     fn exec(&self, _: &mut Stack) -> Result<(), Trap> {
         Ok(())
@@ -1580,6 +1621,11 @@ impl ValidateInstruction for NopOperation {
 
 #[derive(Clone)]
 pub struct UnreachableOperation;
+impl std::fmt::Display for UnreachableOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(unreachable)")
+    }
+}
 impl ValidateInstruction for UnreachableOperation {
     // type Output = Vec<ValueType>;
     fn validate(&self, _: &mut Context, _input: &mut Input) -> ValidateResult<Vec<ValueType>> {
@@ -1592,10 +1638,19 @@ impl ValidateInstruction for UnreachableOperation {
 #[derive(Clone, Default)]
 pub struct BlockOperation {
     label: Option<String>,
-    // id: Option<String>,
     ty: BlockType,
-    // instructions: InstructionSequence,
-    ops: Vec<Box<Opcode>>,
+    ops: Instruction,
+}
+impl std::fmt::Display for BlockOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(block")?;
+        if let Some(label) = self.label.as_ref() {
+            write!(f, " ${}", label)?;
+        }
+        write!(" ")
+
+        write!(f, ")")
+    }
 }
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BlockOperation {
     fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
@@ -1604,6 +1659,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BlockOperation 
         }
         // Copied from FunctionDefinition
         let label = get_id(tokens);
+        let id = None;
 
         if tokens.peek().copied().expect_right_paren().is_ok() {
             return Ok(BlockOperation {
@@ -1613,15 +1669,9 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BlockOperation 
         }
 
         let ty = BlockType::parse(tokens)?;
-        let mut instructions = vec![];
-        while tokens.peek().copied().expect_left_paren().is_ok() {
-            instructions.push(Box::new(Opcode::parse(tokens)?));
-        }
-        Ok(Self {
-            label,
-            ty,
-            ops: instructions,
-        })
+        let ops = Instruction::parse(tokens)?;
+
+        Ok(Self { label, ty, ops })
     }
 }
 impl ValidateInstruction for BlockOperation {
@@ -1654,7 +1704,7 @@ impl ValidateInstruction for BlockOperation {
 pub struct LoopOperation {
     label: Option<String>,
     ty: BlockType,
-    ops: Vec<Box<Opcode>>,
+    ops: Vec<Box<Operation>>,
 }
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for LoopOperation {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
@@ -1665,7 +1715,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for LoopOperation {
         let ty = BlockType::parse(tokens)?;
         let mut instructions = vec![];
         while tokens.peek().copied().expect_left_paren().is_ok() {
-            instructions.push(Box::new(Opcode::parse(tokens)?));
+            instructions.push(Box::new(Operation::parse(tokens)?));
         }
         Ok(Self {
             label,
@@ -1703,9 +1753,9 @@ impl ValidateInstruction for LoopOperation {
 pub struct IfOperation {
     label: Option<String>,
     ty: BlockType,
-    condition: Option<Box<Opcode>>,
-    thens: Vec<Box<Opcode>>,
-    elses: Vec<Box<Opcode>>,
+    condition: Option<Box<Operation>>,
+    thens: Vec<Box<Operation>>,
+    elses: Vec<Box<Operation>>,
 }
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for IfOperation {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
@@ -1718,7 +1768,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for IfOperation {
 
         let condition = match get_next_keyword(tokens) {
             Some(Keyword::Then) | Some(Keyword::Else) | None => None,
-            Some(_) => Some(Box::new(Opcode::parse(tokens)?)),
+            Some(_) => Some(Box::new(Operation::parse(tokens)?)),
         };
 
         let mut thens = vec![];
@@ -1726,7 +1776,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for IfOperation {
             tokens.next().expect_left_paren()?;
             tokens.next().expect_keyword_token(Keyword::Then)?;
             while tokens.peek().copied().expect_left_paren().is_ok() {
-                thens.push(Box::new(Opcode::parse(tokens)?));
+                thens.push(Box::new(Operation::parse(tokens)?));
             }
             tokens.next().expect_right_paren()?;
         }
@@ -1736,7 +1786,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for IfOperation {
             tokens.next().expect_left_paren()?;
             tokens.next().expect_keyword_token(Keyword::Else)?;
             while tokens.peek().copied().expect_left_paren().is_ok() {
-                elses.push(Box::new(Opcode::parse(tokens)?));
+                elses.push(Box::new(Operation::parse(tokens)?));
             }
             tokens.next().expect_right_paren()?;
         }

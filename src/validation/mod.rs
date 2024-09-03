@@ -334,97 +334,97 @@ pub trait ValidateInstruction {
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>>;
 }
 
-pub struct InstructionSequence {
-    instructions: Vec<Box<dyn ValidateInstruction>>,
-}
+// pub struct InstructionSequence {
+//     instructions: Vec<Box<dyn ValidateInstruction>>,
+// }
 
-impl ValidateInstruction for InstructionSequence {
-    fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        for index in 0..self.instructions.len() {
-            // TODO(Alec): I believe this bit of code validates all instructions.
-            // https://webassembly.github.io/spec/core/valid/instructions.html#non-empty-instruction-sequence-xref-syntax-instructions-syntax-instr-mathit-instr-ast-xref-syntax-instructions-syntax-instr-mathit-instr-n
-            let output = self.instructions[index].validate(ctx, inputs)?;
-            if index == self.instructions.len() - 1 {
-                return Ok(output);
-            } else {
-                inputs.0.extend(output);
-            }
-        }
-        Err(ValidationError::new())
-    }
-}
+// impl ValidateInstruction for InstructionSequence {
+//     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
+//         for index in 0..self.instructions.len() {
+//             // TODO(Alec): I believe this bit of code validates all instructions.
+//             // https://webassembly.github.io/spec/core/valid/instructions.html#non-empty-instruction-sequence-xref-syntax-instructions-syntax-instr-mathit-instr-ast-xref-syntax-instructions-syntax-instr-mathit-instr-n
+//             let output = self.instructions[index].validate(ctx, inputs)?;
+//             if index == self.instructions.len() - 1 {
+//                 return Ok(output);
+//             } else {
+//                 inputs.0.extend(output);
+//             }
+//         }
+//         Err(ValidationError::new())
+//     }
+// }
 
-/// Used for function bodies, global initialization values, elements and offsets of
-/// element segments and offsets of data segments are given as expressions which
-/// are sequences of instructions terminated by an end marker.
-pub struct Expression {
-    instructions: Vec<Box<dyn ValidateInstruction>>,
-}
+// Used for function bodies, global initialization values, elements and offsets of
+// element segments and offsets of data segments are given as expressions which
+// are sequences of instructions terminated by an end marker.
+// pub struct Expression {
+//     instructions: Vec<Box<dyn ValidateInstruction>>,
+// }
 
-impl Expression {
-    pub fn new(instructions: Vec<Box<dyn ValidateInstruction>>) -> Self {
-        Self { instructions }
-    }
-}
+// impl Expression {
+//     pub fn new(instructions: Vec<Box<dyn ValidateInstruction>>) -> Self {
+//         Self { instructions }
+//     }
+// }
 
-impl ValidateInstruction for Expression {
-    fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        for index in 0..self.instructions.len() {
-            // TODO(Alec): I believe this bit of code validates all instructions.
-            // https://webassembly.github.io/spec/core/valid/instructions.html#non-empty-instruction-sequence-xref-syntax-instructions-syntax-instr-mathit-instr-ast-xref-syntax-instructions-syntax-instr-mathit-instr-n
-            let output = self.instructions[index].validate(ctx, inputs)?;
-            if index == self.instructions.len() - 1 {
-                return Ok(output);
-            } else {
-                inputs.0.extend(output);
-            }
-        }
-        Err(ValidationError::new())
-    }
-}
+// impl ValidateInstruction for Expression {
+//     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
+//         for index in 0..self.instructions.len() {
+//             // TODO(Alec): I believe this bit of code validates all instructions.
+//             // https://webassembly.github.io/spec/core/valid/instructions.html#non-empty-instruction-sequence-xref-syntax-instructions-syntax-instr-mathit-instr-ast-xref-syntax-instructions-syntax-instr-mathit-instr-n
+//             let output = self.instructions[index].validate(ctx, inputs)?;
+//             if index == self.instructions.len() - 1 {
+//                 return Ok(output);
+//             } else {
+//                 inputs.0.extend(output);
+//             }
+//         }
+//         Err(ValidationError::new())
+//     }
+// }
 
 // TODO(Alec): I'm not sure we need these expressions just yet. Maybe when we
 // get into parsing.
-pub struct ConstantExpression {
-    instructions: Vec<Box<dyn ValidateInstruction>>,
-}
+// pub struct ConstantExpression {
+//     instructions: Vec<Box<dyn ValidateInstruction>>,
+// }
 
-impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for ConstantExpression {
-    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
-        tokens.next().expect_left_paren()?;
-        match tokens.next().expect_keyword()? {
-            Keyword::Const(ty) => {
-                let number = read_number(ty.clone(), tokens.next().expect_number()?)?;
-                tokens.next().expect_right_paren()?;
-                Ok(ConstantExpression {
-                    instructions: vec![Box::new(Const::new(ty, number))],
-                })
-            }
-            key => Err(Error::new(
-                None,
-                format!("Expected constant expression. Found {:?}", key),
-            )),
-        }
-    }
-}
+// impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for ConstantExpression {
+//     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+//         tokens.next().expect_left_paren()?;
+//         match tokens.next().expect_keyword()? {
+//             Keyword::Const(ty) => {
+//                 let number = read_number(ty.clone(), tokens.next().expect_number()?)?;
+//                 tokens.next().expect_right_paren()?;
+//                 Ok(ConstantExpression {
+//                     instructions: vec![Box::new(Const::new(ty, number))],
+//                 })
+//             }
+//             key => Err(Error::new(
+//                 None,
+//                 format!("Expected constant expression. Found {:?}", key),
+//             )),
+//         }
+//     }
+// }
 
-impl ValidateInstruction for ConstantExpression {
-    fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        for index in 0..self.instructions.len() {
-            // TODO(Alec): I believe this bit of code validates all instructions.
-            // https://webassembly.github.io/spec/core/valid/instructions.html#non-empty-instruction-sequence-xref-syntax-instructions-syntax-instr-mathit-instr-ast-xref-syntax-instructions-syntax-instr-mathit-instr-n
-            // TODO(Alec): Validate that the expression thats ran is only constant expressions.
-            // because right now other parts of the program depend on these only being constant commands
-            let output = self.instructions[index].validate(ctx, inputs)?;
-            if index == self.instructions.len() - 1 {
-                return Ok(output);
-            } else {
-                inputs.0.extend(output);
-            }
-        }
-        Err(ValidationError::new())
-    }
-}
+// impl ValidateInstruction for ConstantExpression {
+//     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
+//         for index in 0..self.instructions.len() {
+//             // TODO(Alec): I believe this bit of code validates all instructions.
+//             // https://webassembly.github.io/spec/core/valid/instructions.html#non-empty-instruction-sequence-xref-syntax-instructions-syntax-instr-mathit-instr-ast-xref-syntax-instructions-syntax-instr-mathit-instr-n
+//             // TODO(Alec): Validate that the expression thats ran is only constant expressions.
+//             // because right now other parts of the program depend on these only being constant commands
+//             let output = self.instructions[index].validate(ctx, inputs)?;
+//             if index == self.instructions.len() - 1 {
+//                 return Ok(output);
+//             } else {
+//                 inputs.0.extend(output);
+//             }
+//         }
+//         Err(ValidationError::new())
+//     }
+// }
 
 // pub struct Expr {
 

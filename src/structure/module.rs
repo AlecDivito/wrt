@@ -1,14 +1,16 @@
-use crate::parse::{
-    ast::{read_u32, Error, Expect, Tee, TryGet, Visit},
-    Keyword, TokenType,
+use crate::{
+    parse::{
+        ast::{read_u32, Error, Expect, Tee, TryGet, Visit},
+        Keyword, TokenType,
+    },
+    validation::instruction::{Const, Operation},
 };
 use std::{collections::HashSet, iter::Peekable};
 
 use crate::{
     parse::{ast::Parse, Token},
     validation::{
-        ConstantExpression, Context, Expression, Input, ValidateInstruction, ValidateResult,
-        Validation, ValidationError,
+        Context, Input, ValidateInstruction, ValidateResult, Validation, ValidationError,
     },
 };
 
@@ -39,11 +41,11 @@ pub struct Function {
 
     // A sequence of instructions. When complete the stack should match the function
     // result type.
-    body: Expression,
+    body: Operation,
 }
 
 impl Function {
-    pub fn new(ty_index: FnType, locals: Vec<ValueType>, body: Expression) -> Self {
+    pub fn new(ty_index: FnType, locals: Vec<ValueType>, body: Operation) -> Self {
         Self {
             ty_index,
             locals,
@@ -119,7 +121,7 @@ pub struct Global {
     id: Option<String>,
     ty: GlobalType,
     // Requirement, must be a constant initializer expression.
-    init: ConstantExpression,
+    init: Const,
 }
 
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Global {
@@ -127,7 +129,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Global {
         tokens.next().expect_left_paren()?;
         tokens.next().expect_keyword_token(Keyword::Global)?;
         let id = get_id(tokens);
-        let init = ConstantExpression::parse(tokens)?;
+        let init = Const::parse(tokens)?;
         let ty = GlobalType::parse(tokens)?;
         tokens.next().expect_right_paren()?;
         Ok(Self { id, ty, init })
@@ -162,7 +164,7 @@ pub enum ElementMode {
         // the table to use
         table: TableIndex,
         // constant express defining an offset into the table
-        offset: Expression,
+        offset: Operation,
     },
 }
 
@@ -172,7 +174,7 @@ pub struct Element {
     // Defined reference type
     ty: RefType,
     // Required to be a list of constant element expressions
-    inits: Vec<ConstantExpression>,
+    inits: Vec<Const>,
     // Identify type of element
     mode: ElementMode,
 }
@@ -217,7 +219,7 @@ pub enum DataMode {
     Active {
         memory: MemoryIndex,
         // Expression must be a constant expression that defines an offset into memory.
-        offset: ConstantExpression,
+        offset: Const,
     },
 }
 

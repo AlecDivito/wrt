@@ -25,7 +25,7 @@ use crate::{
         module::{Function, Module},
         types::{FunctionType, GlobalType, MemoryType, NumType, RefType, TableType, ValueType},
     },
-    validation::{Context, Input, InstructionSequence, ValidateInstruction},
+    validation::{instruction::Operation, Context, Input, ValidateInstruction},
 };
 
 #[derive(Debug)]
@@ -78,6 +78,16 @@ pub enum Number {
     I64(i64),
     F32(f32),
     F64(f64),
+}
+impl std::fmt::Display for Number {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Number::I32(num) => write!(f, "{}", num),
+            Number::I64(num) => write!(f, "{}", num),
+            Number::F32(num) => write!(f, "{}", num),
+            Number::F64(num) => write!(f, "{}", num),
+        }
+    }
 }
 
 // impl FromStr for Number {
@@ -291,10 +301,10 @@ pub struct Label {
     // TODO(Alec): DO i need an index here or something?
     // carry an argument arity _n_ and their associated branch _target_
     // Not sure what the above means...
-    //
+
     // InstructionSequence is the continuation to execute when the branch is taken,
     // in place of the original control
-    instructions: InstructionSequence,
+    instructions: Vec<Operation>,
 }
 
 /// Most instructions interact with a [Stack].
@@ -338,15 +348,15 @@ impl Stack {
     }
 }
 
-/// A computation over instructions that operates relative to the state of a current
-/// frame referring to the module instance in which the computations runs, ie. where
-/// the current function originates from
-pub struct Thread {
-    frame: Frame,
-    instructions: InstructionSequence,
-}
+// A computation over instructions that operates relative to the state of a current
+// frame referring to the module instance in which the computations runs, ie. where
+// the current function originates from
+// pub struct Thread {
+//     frame: Frame,
+//     instructions: InstructionSequence,
+// }
 
-pub struct Configuration {
-    store: Store,
-    thread: Thread,
-}
+// pub struct Configuration {
+//     store: Store,
+//     thread: Thread,
+// }
