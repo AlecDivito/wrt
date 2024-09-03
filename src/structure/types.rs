@@ -1,13 +1,14 @@
-use std::{fmt::Display, iter::Peekable};
+use std::{default, fmt::Display, iter::Peekable};
 
 use crate::{
-    execution::PAGE_SIZE,
+    execution::{ModuleInstance, Store, PAGE_SIZE},
     parse::{
         ast::{read_u32, Error, Expect, Parse, TryGet},
         tokenize, Keyword, Token,
     },
     validation::{
-        instruction::Opcode, Context, Input, ValidateInstruction, Validation, ValidationError,
+        instruction::{Const, Execute, Opcode},
+        Context, Input, ValidateInstruction, ValidateResult, Validation, ValidationError,
     },
 };
 
@@ -40,6 +41,21 @@ impl Default for BlockType {
         Self::Value(None)
     }
 }
+/*
+if Some(Keyword::Type) == get_next_keyword(tokens) {
+            return Ok(BlockType::Index(TypeUse::parse(tokens)?.0));
+        } else if Some(Keyword::Result) == get_next_keyword(tokens) {
+            let mut result = FuncResult::parse(tokens)?.0;
+            let ty = result.pop().map(|ty| *ty.ty());
+            if !result.is_empty() {
+                return Err(Error::new(
+                    tokens.next().cloned(),
+                    "Select result block has too many arguments".to_string(),
+                ));
+            }
+            return Ok(Self::Value(ty));
+        }
+        Ok(BlockType::Value(None)) */
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BlockType {
     fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
         if Some(Keyword::Type) == get_next_keyword(tokens) {
@@ -98,6 +114,10 @@ impl Variable {
     pub fn ty(&self) -> &ValueType {
         &self.ty
     }
+
+    pub fn id(&self) -> Option<&String> {
+        self.id.as_ref()
+    }
 }
 
 #[derive(Clone)]
@@ -149,7 +169,11 @@ pub enum GlobalType {
     // Mutable global value
     Var(ValueType),
 }
-
+impl Default for GlobalType {
+    fn default() -> Self {
+        Self::Const(ValueType::RefType(RefType::default()))
+    }
+}
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for GlobalType {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
         Ok(if let Some(_) = tokens.peek().copied().try_left_paran() {
@@ -198,7 +222,7 @@ impl Validation<GlobalType> for GlobalType {
 /// TODO(Alec): Validate...
 ///
 /// Like ["Memory"] tables have a size limit.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct TableType {
     limit: Limit,
     ref_type: RefType,
@@ -293,7 +317,7 @@ impl MemoryArgument {
 /// Classify linear ['Memories'] and their size range.
 ///
 /// Contains the min and max of memory size, given in units of Page Size.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct MemoryType {
     limit: Limit,
 }
@@ -319,7 +343,7 @@ impl Validation<MemoryType> for MemoryType {
 
 /// ["Limit"] size range of resizable storage. Associated with ["Memory"] and
 /// ["Table"] types. Max is optional.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Limit {
     min: u32,
     max: Option<u32>,
@@ -484,6 +508,11 @@ impl Default for FuncParam {
         }
     }
 }
+impl FuncParam {
+    pub fn ty(&self) -> ResultType {
+        ResultType::new(self.var.clone())
+    }
+}
 impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for FuncParam {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
         tokens.next().expect_left_paren()?;
@@ -527,6 +556,11 @@ impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for LocalParam {
 
 #[derive(Default)]
 pub struct FuncResult(pub Vec<Variable>);
+impl FuncResult {
+    pub fn ty(&self) -> ResultType {
+        ResultType::new(self.0.clone())
+    }
+}
 impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for FuncResult {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
         tokens.next().expect_left_paren()?;
@@ -546,7 +580,15 @@ pub struct TypeDefinition {
     params: FuncParam,
     result: FuncResult,
 }
+impl TypeDefinition {
+    pub fn id(&self) -> Option<&String> {
+        self.id.as_ref()
+    }
 
+    pub fn ty(&self) -> FunctionType {
+        FunctionType::new(self.params.ty(), self.result.ty())
+    }
+}
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for TypeDefinition {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
         let mut this = Self::default();
@@ -585,7 +627,11 @@ pub enum ValueType {
     VecType(VecType),
     RefType(RefType),
 }
-
+impl Default for ValueType {
+    fn default() -> Self {
+        Self::RefType(RefType::default())
+    }
+}
 impl ValueType {
     /// Returns `true` if the value type is [`Num`].
     ///
@@ -672,7 +718,11 @@ pub enum RefType {
     // This is a type of pointer.
     ExternRef(ExternRef),
 }
-
+impl Default for RefType {
+    fn default() -> Self {
+        Self::ExternRef(ExternRef::default())
+    }
+}
 impl RefType {
     pub fn try_into_func_ref(self) -> Result<FunctionReference, ValidationError> {
         if let Self::FuncRef(v) = self {
@@ -743,8 +793,9 @@ pub enum NumType {
     F64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IntType {
+    #[default]
     I32,
     I64,
 }
@@ -996,6 +1047,11 @@ impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for RelativeImport {
 
 #[derive(Default, Clone)]
 pub struct TypeUse(Index);
+impl TypeUse {
+    pub fn index(&self) -> &Index {
+        &self.0
+    }
+}
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for TypeUse {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
         tokens.next().expect_left_paren()?;
@@ -1052,6 +1108,14 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Instruction {
             instructions.push(Opcode::parse(tokens)?)
         }
         Ok(Instruction { instructions })
+    }
+}
+impl ValidateInstruction for Instruction {
+    fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
+        for expr in &self.instructions {
+            expr.validate(ctx, inputs)?;
+        }
+        Ok(vec![])
     }
 }
 
@@ -1317,6 +1381,75 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for AssertInvalid {
     }
 }
 
+pub struct AssertReturn {
+    function_name: String,
+    variables: Vec<Box<dyn Execute>>,
+    expected: Vec<Box<dyn Execute>>,
+}
+
+impl AssertReturn {
+    pub fn test(self, module: &Module) -> Result<(), Error> {
+        // store is global state
+        let mut store = Store::default();
+
+        // instance is
+        let instance = ModuleInstance::new(&mut store, module).expect("success");
+
+        todo!("ahahahaha, i should never reach this yet :P");
+        // match module.call(&mut ctx, &mut input) {
+        //     Ok(_) => Err(Error::new(
+        //         None,
+        //         "Module validated successfully when it was expected to fail",
+        //     )),
+        //     Err(err) if err.error_ty() == self.expected_error => Ok(()),
+        //     Err(err) => Err(Error::new(
+        //         None,
+        //         format!(
+        //             "Error '{}' != '{}'. Expected '{}'",
+        //             self.expected_error,
+        //             err.error_ty(),
+        //             err.error()
+        //         ),
+        //     )),
+        // }
+    }
+}
+
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for AssertReturn {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::AssertReturn)?;
+
+        // Parse Inoke
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::Invoke)?;
+        let function_name = tokens.next().expect_string()?;
+
+        let mut variables: Vec<Box<dyn Execute>> = vec![];
+        while tokens.peek().copied().expect_left_paren().is_ok() {
+            tokens.next().expect_left_paren()?;
+            variables.push(Box::new(Const::parse(tokens)?));
+            tokens.next().expect_right_paren()?;
+        }
+        tokens.next().expect_right_paren()?;
+
+        // Parse Result
+        let mut expected: Vec<Box<dyn Execute>> = vec![];
+        while tokens.peek().copied().expect_left_paren().is_ok() {
+            tokens.next().expect_left_paren()?;
+            expected.push(Box::new(Const::parse(tokens)?));
+            tokens.next().expect_right_paren()?;
+        }
+
+        tokens.next().expect_right_paren()?;
+        Ok(Self {
+            function_name,
+            variables,
+            expected,
+        })
+    }
+}
+
 #[derive(Default, Clone)]
 pub struct FunctionDefinition {
     // id
@@ -1332,6 +1465,20 @@ pub struct FunctionDefinition {
     locals: Vec<Variable>,
     // instructions
     instructions: Instruction,
+}
+
+impl FunctionDefinition {
+    pub fn id(&self) -> Option<&String> {
+        self.id.as_ref()
+    }
+
+    pub fn ty_def(&self) -> Option<&TypeUse> {
+        self.ty.as_ref()
+    }
+
+    pub fn ty(&self) -> FunctionType {
+        FunctionType::new(self.params.clone(), self.result.clone())
+    }
 }
 
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for FunctionDefinition {
@@ -1368,5 +1515,34 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for FunctionDefinit
 
         tokens.next().expect_right_paren()?;
         Ok(this)
+    }
+}
+
+impl ValidateInstruction for FunctionDefinition {
+    fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
+        let ty = if let Some(ty) = &self.ty {
+            ctx.get_type(ty.index())?.clone()
+        } else {
+            FunctionType::new(self.params.clone(), self.result.clone())
+        };
+
+        let mut ctx1 = ctx.clone();
+        for parameters in &self.params.values {
+            ctx1.push_local(parameters);
+        }
+        for local in &self.locals {
+            ctx1.push_local(local);
+        }
+        // TODO(Alec): Labels, we don't store them right now on our function defintion
+        // https://webassembly.github.io/spec/core/valid/modules.html#functions
+        ctx1.set_returning(Some(self.result.clone()));
+
+        let return_ty = self.instructions.validate(&mut ctx1, inputs)?;
+
+        if return_ty == self.result.values() {
+            Ok(return_ty)
+        } else {
+            Err(ValidationError::new())
+        }
     }
 }

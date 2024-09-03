@@ -4,7 +4,7 @@ use crate::{
     execution::Number,
     structure::{
         module::Module,
-        types::{AssertInvalid, AssertMalformed, NumType},
+        types::{AssertInvalid, AssertMalformed, AssertReturn, NumType},
     },
 };
 
@@ -198,6 +198,16 @@ impl<'a> Expect<'a> for Option<&'a Token> {
 
 pub fn read_number(expected: NumType, token: &Token) -> Result<Number, Error> {
     Ok(match expected {
+        NumType::I32 if token.source.starts_with('-') => token
+            .source
+            .parse::<i32>()
+            .map(Number::I32)
+            .map_err(|err| {
+                Error::new(
+                    Some(token.clone()),
+                    format!("Error parsing negative i32: {:?}", err),
+                )
+            })?,
         NumType::I32 => Number::I32(read_u32(token)?.try_into().unwrap()),
         NumType::I64 => Number::I64(read_u64(token)?.try_into().unwrap()),
         NumType::F32 => Number::F32(read_f32(token)?),
@@ -247,20 +257,30 @@ pub fn read_f64(token: &Token) -> Result<f64, Error> {
 
 pub fn parse_module_test<'a, I: Iterator<Item = &'a Token> + Clone>(
     tokens: &mut Peekable<I>,
-) -> Result<(), Error> {
+    passed: Option<&Module>,
+) -> Result<Option<Module>, Error> {
     let mut peek_iter = tokens.clone();
     peek_iter.next().expect_left_paren()?;
     let keyword = peek_iter.next().expect_keyword()?;
 
+    let mut module = None;
     match keyword {
-        Keyword::Module => Module::parse(tokens).map(|_| ()),
-        Keyword::AssertMalformed => AssertMalformed::parse(tokens)?.test(),
-        Keyword::AssertInvalid => AssertInvalid::parse(tokens)?.test(),
-        _ => Err(Error::new(
-            tokens.next().cloned(),
-            format!("{keyword:?} was not expected as a top level directive in .wast files"),
-        )),
-    }
+        Keyword::Module => {
+            module = Some(Module::parse(tokens)?);
+        }
+        Keyword::AssertMalformed => AssertMalformed::parse(tokens)?.test()?,
+        Keyword::AssertInvalid => AssertInvalid::parse(tokens)?.test()?,
+        Keyword::AssertReturn if passed.is_some() => {
+            AssertReturn::parse(tokens)?.test(passed.as_ref().unwrap())?
+        }
+        _ => {
+            return Err(Error::new(
+                tokens.next().cloned(),
+                format!("{keyword:?} was not expected as a top level directive in .wast files"),
+            ))
+        }
+    };
+    Ok(module)
 }
 
 #[derive(Debug)]

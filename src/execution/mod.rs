@@ -20,12 +20,32 @@
 pub mod instrunctions;
 
 use crate::{
+    parse::ast::Error,
     structure::{
-        module::Function,
+        module::{Function, Module},
         types::{FunctionType, GlobalType, MemoryType, NumType, RefType, TableType, ValueType},
     },
-    validation::InstructionSequence,
+    validation::{Context, Input, InstructionSequence, ValidateInstruction},
 };
+
+#[derive(Debug)]
+pub struct RuntimeError {
+    error: String,
+}
+
+impl RuntimeError {
+    pub fn new(error: impl ToString) -> Self {
+        Self {
+            error: error.to_string(),
+        }
+    }
+}
+
+impl Into<Error> for RuntimeError {
+    fn into(self) -> Error {
+        Error::new(None, format!("Failed to create runtime. ERROR: {:?}", self))
+    }
+}
 
 /**
  * Constants
@@ -213,6 +233,7 @@ pub struct ExportInstance {
 ///
 /// > In practice, store may use techniques to clean up objects that are no longer
 /// > in use (garbage collection).
+#[derive(Default)]
 pub struct Store {
     functions: Vec<FunctionInstance>,
     tables: Vec<TableInstance>,
@@ -234,6 +255,7 @@ pub struct Store {
 /// that the fields in here are stored as a static indices list. The actual address
 /// maybe different. The Module instance Addresses point to the index to use in the
 /// [Store].
+#[derive(Default)]
 pub struct ModuleInstance {
     types: Vec<FunctionType>,
     function_addresses: Vec<FunctionAddress>,
@@ -244,6 +266,17 @@ pub struct ModuleInstance {
     data_addresses: Vec<DataAddress>,
     // All exports have a different name.
     exports: Vec<ExportInstance>,
+}
+
+impl ModuleInstance {
+    pub fn new(store: &mut Store, module: &Module) -> Result<Self, RuntimeError> {
+        let mut ctx = Context::default();
+        let mut input = Input::new();
+        module.validate(&mut ctx, &mut input).unwrap();
+
+        let this = Self::default();
+        Ok(this)
+    }
 }
 
 /// Carry the return arity _n_ of the respective function, hold the values of the

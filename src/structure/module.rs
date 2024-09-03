@@ -191,7 +191,7 @@ impl ValidateInstruction for Element {
         match &self.mode {
             ElementMode::Passive | ElementMode::Declarative => Ok(vec![]),
             ElementMode::Active { table, offset } => {
-                let _ = ctx.get_table(*table)?;
+                let _ = ctx.get_table(&Index::Index(*table))?;
                 let mut output = offset.validate(ctx, inputs)?;
                 output
                     .pop()
@@ -234,7 +234,7 @@ impl ValidateInstruction for Data {
         match &self.mode {
             DataMode::Passive => Ok(vec![]),
             DataMode::Active { memory, offset } => {
-                let _ = ctx.get_memory(Some(*memory))?;
+                let _ = ctx.get_memory(Some(&Index::Index(*memory)))?;
                 let mut output = offset.validate(ctx, inputs)?;
                 output
                     .pop()
@@ -279,13 +279,14 @@ impl ValidateInstruction for ExportDescription {
                 ctx.get_function(&Index::Index(*index))?.validate(ctx, ())?;
             }
             ExportDescription::Table(index) => {
-                ctx.get_table(*index)?.validate(ctx, ())?;
+                ctx.get_table(&Index::Index(*index))?.validate(ctx, ())?;
             }
             ExportDescription::Memory(index) => {
-                ctx.get_memory(Some(*index))?.validate(ctx, ())?;
+                ctx.get_memory(Some(&Index::Index(*index)))?
+                    .validate(ctx, ())?;
             }
             ExportDescription::Global(index) => {
-                ctx.get_global(*index)?.validate(ctx, ())?;
+                ctx.get_global(&Index::Index(*index))?.validate(ctx, ())?;
             }
         };
         Ok(vec![])
@@ -328,13 +329,14 @@ impl ValidateInstruction for ImportDescription {
                 ctx.get_function(&Index::Index(*index))?.validate(ctx, ())?;
             }
             ImportDescription::Table(index) => {
-                ctx.get_table(*index)?.validate(ctx, ())?;
+                ctx.get_table(&Index::Index(*index))?.validate(ctx, ())?;
             }
             ImportDescription::Memory(index) => {
-                ctx.get_memory(Some(*index))?.validate(ctx, ())?;
+                ctx.get_memory(Some(&Index::Index(*index)))?
+                    .validate(ctx, ())?;
             }
             ImportDescription::Global(index) => {
-                ctx.get_global(*index)?.validate(ctx, ())?;
+                ctx.get_global(&Index::Index(*index))?.validate(ctx, ())?;
             }
         };
         Ok(vec![])
@@ -429,7 +431,7 @@ pub struct Module {
     // and memories have been initialized.
     //
     // NOTE: Intended for use to initialize the state of a module.
-    start: Vec<StartOpts>,
+    start: Option<StartOpts>,
 }
 
 impl Default for Module {
@@ -512,7 +514,15 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Module {
                     tokens.next().expect_left_paren()?;
                     tokens.next().expect_keyword_token(Keyword::Export)?;
                 }
-                Keyword::Start => this.start.push(StartOpts::parse(tokens)?),
+                Keyword::Start => {
+                    // TODO(Alec): This maybe a feature we want for our own modules.
+                    // Having multiple start functions just means we'll call them
+                    // as we see them.
+                    if this.start.is_some() {
+                        panic!("Only one start function can exist in a module")
+                    }
+                    this.start = Some(StartOpts::parse(tokens)?)
+                }
                 keyword => {
                     tokens.next().expect_left_paren()?;
                     return Err(Error::new(
@@ -561,6 +571,15 @@ impl ValidateInstruction for Module {
     // https://webassembly.github.io/spec/core/valid/modules.html#valid-module
 
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
+        // Build up context
+        for ty in &self.types {
+            ctx.push_type(ty);
+        }
+
+        for func in &self.functions {
+            ctx.push_function(func)?;
+        }
+
         // internal function types, in index order
         let ctx_ref = &ctx;
         // let ft = order_lists(
@@ -588,16 +607,17 @@ impl ValidateInstruction for Module {
         // ctx.functions() == self.functions
 
         // Validate all values are ok
-        if !ctx.datas().iter().all(crate::validation::Ok::is_ok) {
-            return Err(ValidationError::new());
-        }
-        // locals is empty
-        if !ctx.locals().is_empty() {
-            return Err(ValidationError::new());
-        }
-        if !ctx.labels().is_empty() {
-            return Err(ValidationError::new());
-        }
+        // if !ctx.datas().iter().all(crate::validation::Ok::is_ok) {
+        //     return Err(ValidationError::new());
+        // }
+
+        // validate all locals are empty, after all validation has been completed.
+        // if !ctx.locals().is_empty() {
+        //     return Err(ValidationError::new());
+        // }
+        // if !ctx.labels().is_empty() {
+        //     return Err(ValidationError::new());
+        // }
         if ctx.returning().is_some() {
             return Err(ValidationError::new());
         }
@@ -609,7 +629,7 @@ impl ValidateInstruction for Module {
         // ## Under context of ctx
         // Every function in our module must be valid
         for func in &self.functions {
-            // func.validate(ctx, inputs)?;
+            func.validate(ctx, inputs)?;
         }
 
         // If module start exists, it must be valid

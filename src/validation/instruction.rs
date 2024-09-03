@@ -38,15 +38,46 @@ enum Operation {
     Block(BlockOperation),
     Call(CallOperation),
     Loop(LoopOperation),
+    If(IfOperation),
+    Break(BrOperation),
+    BreakIf(BrIfOperation),
+    BreakTable(BrTableOperation),
+    Return(ReturnOperation),
 
     // Unary
     Test(TestOperation),
     Unary(UnaryOperation),
-}
 
+    // Binary
+    Binary(BinaryOperation),
+}
 impl Default for Operation {
     fn default() -> Self {
         Operation::Nop(NopOperation {})
+    }
+}
+impl ValidateInstruction for Operation {
+    fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
+        match self {
+            Operation::Const(v) => v.validate(ctx, inputs),
+            Operation::Nop(v) => v.validate(ctx, inputs),
+            Operation::GlobalGet(v) => v.validate(ctx, inputs),
+            Operation::LocalGet(v) => v.validate(ctx, inputs),
+            Operation::Unreachable(v) => v.validate(ctx, inputs),
+            Operation::Drop(v) => v.validate(ctx, inputs),
+            Operation::Select(v) => v.validate(ctx, inputs),
+            Operation::Block(v) => v.validate(ctx, inputs),
+            Operation::Call(v) => v.validate(ctx, inputs),
+            Operation::Loop(v) => v.validate(ctx, inputs),
+            Operation::If(v) => v.validate(ctx, inputs),
+            Operation::Break(v) => v.validate(ctx, inputs),
+            Operation::BreakIf(v) => v.validate(ctx, inputs),
+            Operation::BreakTable(v) => v.validate(ctx, inputs),
+            Operation::Return(v) => v.validate(ctx, inputs),
+            Operation::Test(v) => v.validate(ctx, inputs),
+            Operation::Unary(v) => v.validate(ctx, inputs),
+            Operation::Binary(v) => v.validate(ctx, inputs),
+        }
     }
 }
 
@@ -54,6 +85,14 @@ impl Default for Operation {
 pub struct Opcode {
     op: Operation,
     children: Vec<Opcode>,
+}
+impl ValidateInstruction for Opcode {
+    fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
+        for expr in &self.children {
+            expr.validate(ctx, inputs)?;
+        }
+        self.op.validate(ctx, inputs)
+    }
 }
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Opcode {
     fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
@@ -70,13 +109,11 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Opcode {
             Keyword::Block => Operation::Block(BlockOperation::parse(tokens)?),
             Keyword::Loop => Operation::Loop(LoopOperation::parse(tokens)?),
             Keyword::End => todo!(),
-            Keyword::Br => todo!(),
-            Keyword::BrIf => todo!(),
-            Keyword::BrTable => todo!(),
-            Keyword::Return => todo!(),
-            Keyword::If => todo!(),
-            Keyword::Then => todo!(),
-            Keyword::Else => todo!(),
+            Keyword::Br => Operation::Break(BrOperation::parse(tokens)?),
+            Keyword::BrIf => Operation::BreakIf(BrIfOperation::parse(tokens)?),
+            Keyword::BrTable => Operation::BreakTable(BrTableOperation::parse(tokens)?),
+            Keyword::Return => Operation::Return(ReturnOperation {}),
+            Keyword::If => Operation::If(IfOperation::parse(tokens)?),
             Keyword::Select => Operation::Select(SelectOperation::parse(tokens)?),
             Keyword::Call => Operation::Call(CallOperation::parse(tokens)?),
             Keyword::CallIndirect => todo!(),
@@ -162,7 +199,9 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Opcode {
             Keyword::TruncateFloat(expected) => {
                 Operation::Unary(UnaryOperation::new(expected, UnaryFunction::Trunc))
             }
-            Keyword::AddInt(_) => todo!(),
+            Keyword::AddInt(expected) => {
+                Operation::Binary(BinaryOperation::new(BinaryFunction::Add(expected)))
+            }
             Keyword::SubInt(_) => todo!(),
             Keyword::MultiplyInt(_) => todo!(),
             Keyword::AndInt(_) => todo!(),
@@ -363,7 +402,21 @@ pub struct Const {
     ty: NumType,
     value: Number,
 }
-
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Const {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        // TODO(Alec): In the future select may allow for more data to be selected
+        match tokens.next().expect_keyword()? {
+            Keyword::Const(expected) => Ok(Const::new(
+                expected,
+                read_number(expected, tokens.next().expect_number()?)?,
+            )),
+            keyword => Err(Error::new(
+                tokens.next().cloned(),
+                format!("Expected const.xx but got keyword {:?}", keyword),
+            )),
+        }
+    }
+}
 impl Const {
     pub fn new(ty: NumType, value: Number) -> Self {
         Self { ty, value }
@@ -434,7 +487,25 @@ impl Execute for UnaryOperation {
 }
 
 // Validate Binary Operation. Only avaliable for numbers.
-pub struct BinaryOperation;
+#[derive(Clone)]
+pub enum BinaryFunction {
+    Add(IntType),
+}
+impl Default for BinaryFunction {
+    fn default() -> Self {
+        Self::Add(IntType::default())
+    }
+}
+#[derive(Clone, Default)]
+pub struct BinaryOperation {
+    func: BinaryFunction,
+}
+
+impl BinaryOperation {
+    pub fn new(func: BinaryFunction) -> Self {
+        Self { func }
+    }
+}
 impl ValidateInstruction for BinaryOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, _: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
@@ -984,7 +1055,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for LocalGetOperati
 impl ValidateInstruction for LocalGetOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let a = *ctx.get_local(self.index)?;
+        let a = *ctx.get_local(&Index::Index(self.index))?;
         Ok(vec![a])
     }
 }
@@ -1026,7 +1097,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for GlobalGetOperat
 impl ValidateInstruction for GlobalGetOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let global = ctx.get_global(self.index)?;
+        let global = ctx.get_global(&Index::Index(self.index))?;
         match global {
             // https://webassembly.github.io/spec/core/valid/instructions.html#xref-syntax-instructions-syntax-instr-variable-mathsf-global-get-x
             // Why can't we get a const?
@@ -1057,7 +1128,7 @@ pub struct TableGetOperation {
 impl ValidateInstruction for TableGetOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let table = ctx.get_table(self.index)?;
+        let table = ctx.get_table(&Index::Index(self.index))?;
         inputs.pop()?.try_into_num()?.try_into_i32()?;
         Ok(vec![ValueType::RefType(*table.ref_type())])
     }
@@ -1069,7 +1140,7 @@ pub struct TableSetOperation {
 impl ValidateInstruction for TableSetOperation {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let table = ctx.get_table(self.index)?;
+        let table = ctx.get_table(&Index::Index(self.index))?;
         let _tb_set_value = inputs.pop()?.try_into_ref_type()?;
         let _tbl_index = inputs.pop()?.try_into_num()?.try_into_i32()?;
         if _tb_set_value == *table.ref_type() {
@@ -1086,7 +1157,7 @@ pub struct TableSizeOperation {
 impl ValidateInstruction for TableSizeOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let _table = ctx.get_table(self.index)?;
+        let _table = ctx.get_table(&Index::Index(self.index))?;
         Ok(vec![ValueType::Num(NumType::I32)])
     }
 }
@@ -1097,7 +1168,7 @@ pub struct TableGrowOperation {
 impl ValidateInstruction for TableGrowOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let table = ctx.get_table(self.index)?;
+        let table = ctx.get_table(&Index::Index(self.index))?;
 
         let _tbl_index = inputs.pop()?.try_into_num()?.try_into_i32()?;
         let _tb_set_value = inputs.pop()?.try_into_ref_type()?;
@@ -1116,7 +1187,7 @@ pub struct TableFillOperation {
 impl ValidateInstruction for TableFillOperation {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let table = ctx.get_table(self.index)?;
+        let table = ctx.get_table(&Index::Index(self.index))?;
 
         let _tbl_from = inputs.pop()?.try_into_num()?.try_into_i32()?;
         let _tb_set_value = inputs.pop()?.try_into_ref_type()?;
@@ -1137,8 +1208,8 @@ pub struct TableCopyOperation {
 impl ValidateInstruction for TableCopyOperation {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let table_x = ctx.get_table(self.table_x_index)?;
-        let table_y = ctx.get_table(self.table_y_index)?;
+        let table_x = ctx.get_table(&Index::Index(self.table_x_index))?;
+        let table_y = ctx.get_table(&Index::Index(self.table_y_index))?;
         if table_x.ref_type() == table_y.ref_type() {
             inputs.pop()?.try_into_num()?.try_into_i32()?;
             inputs.pop()?.try_into_num()?.try_into_i32()?;
@@ -1157,8 +1228,8 @@ pub struct TableInitOperation {
 impl ValidateInstruction for TableInitOperation {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let table = ctx.get_table(self.table)?;
-        let element = ctx.get_element(self.element)?;
+        let table = ctx.get_table(&Index::Index(self.table))?;
+        let element = ctx.get_element(&Index::Index(self.element))?;
         if *table.ref_type() == *element {
             inputs.pop()?.try_into_num()?.try_into_i32()?;
             inputs.pop()?.try_into_num()?.try_into_i32()?;
@@ -1176,7 +1247,7 @@ pub struct ElementDropOperation {
 impl ValidateInstruction for ElementDropOperation {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, _inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        ctx.get_element(self.element)?;
+        ctx.get_element(&Index::Index(self.element))?;
         Ok(vec![])
     }
 }
@@ -1195,7 +1266,7 @@ pub struct LoadMemoryOperation {
 impl ValidateInstruction for LoadMemoryOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let _memory = ctx.get_memory(self.memory)?;
+        let _memory = ctx.get_memory(self.memory.map(Index::Index).as_ref())?;
         let bit_width = self.ty.bit_width();
         let alignment = 2_u32.pow(self.args.align());
         if alignment <= (bit_width / 8) {
@@ -1221,7 +1292,7 @@ pub struct LoadNMemoryOperation {
 impl ValidateInstruction for LoadNMemoryOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let _memory = ctx.get_memory(self.memory)?;
+        let _memory = ctx.get_memory(self.memory.map(Index::Index).as_ref())?;
         let bit_width = self.load_n.bit_width();
         let alignment = 2_u32.pow(self.args.align());
         if alignment <= (bit_width / 8) {
@@ -1244,7 +1315,7 @@ pub struct StoreMemoryOperation {
 impl ValidateInstruction for StoreMemoryOperation {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let _memory = ctx.get_memory(self.memory)?;
+        let _memory = ctx.get_memory(self.memory.map(Index::Index).as_ref())?;
         let bit_width = self.ty.bit_width();
         let alignment = 2_u32.pow(self.args.align());
         if alignment <= (bit_width / 8) {
@@ -1270,7 +1341,7 @@ pub struct StoreNMemoryOperation {
 impl ValidateInstruction for StoreNMemoryOperation {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let _memory = ctx.get_memory(self.memory)?;
+        let _memory = ctx.get_memory(self.memory.map(Index::Index).as_ref())?;
         let bit_width = self.load_n.bit_width();
         let alignment = 2_u32.pow(self.args.align());
         if alignment <= (bit_width / 8) {
@@ -1296,7 +1367,7 @@ pub struct VectorLoadMemoryOperation {
 impl ValidateInstruction for VectorLoadMemoryOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let _memory = ctx.get_memory(self.memory)?;
+        let _memory = ctx.get_memory(self.memory.map(Index::Index).as_ref())?;
         let bit_width = self.op.bit_width();
         let alignment = 2_u32.pow(self.args.align());
         if alignment <= bit_width {
@@ -1320,7 +1391,7 @@ pub struct VectorLoadNSplatMemoryOperation {
 impl ValidateInstruction for VectorLoadNSplatMemoryOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let _memory = ctx.get_memory(self.memory)?;
+        let _memory = ctx.get_memory(self.memory.map(Index::Index).as_ref())?;
         let bit_width = self.width_n.bit_width();
         let alignment = 2_u32.pow(self.args.align());
 
@@ -1345,7 +1416,7 @@ pub struct VectorLoadNZeroMemoryOperation {
 impl ValidateInstruction for VectorLoadNZeroMemoryOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let _memory = ctx.get_memory(self.memory)?;
+        let _memory = ctx.get_memory(self.memory.map(Index::Index).as_ref())?;
         let bit_width = self.width_n.bit_width();
         let alignment = 2_u32.pow(self.args.align());
 
@@ -1375,7 +1446,7 @@ impl ValidateInstruction for VectorLoadNLaneMemoryOperation {
             return Err(ValidationError::new());
         }
 
-        let _memory = ctx.get_memory(self.memory)?;
+        let _memory = ctx.get_memory(self.memory.map(Index::Index).as_ref())?;
         let bit_width = self.width_n.bit_width();
         let alignment = 2_u32.pow(self.args.align());
 
@@ -1406,7 +1477,7 @@ impl ValidateInstruction for VectorStoreNLaneMemoryOperation {
             return Err(ValidationError::new());
         }
 
-        let _memory = ctx.get_memory(self.memory)?;
+        let _memory = ctx.get_memory(self.memory.map(Index::Index).as_ref())?;
         let bit_width = self.width_n.bit_width();
         let alignment = 2_u32.pow(self.args.align());
 
@@ -1424,7 +1495,7 @@ pub struct MemorySize(Option<MemoryIndex>);
 impl ValidateInstruction for MemorySize {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, _inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let _ = ctx.get_memory(self.0)?;
+        let _ = ctx.get_memory(self.0.map(Index::Index).as_ref())?;
         Ok(vec![ValueType::Num(NumType::I32)])
     }
 }
@@ -1433,7 +1504,7 @@ pub struct MemoryGrow(Option<MemoryIndex>);
 impl ValidateInstruction for MemoryGrow {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let _ = ctx.get_memory(self.0)?;
+        let _ = ctx.get_memory(self.0.map(Index::Index).as_ref())?;
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
         Ok(vec![ValueType::Num(NumType::I32)])
     }
@@ -1443,7 +1514,7 @@ pub struct MemoryFill(Option<MemoryIndex>);
 impl ValidateInstruction for MemoryFill {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let _ = ctx.get_memory(self.0)?;
+        let _ = ctx.get_memory(self.0.map(Index::Index).as_ref())?;
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
@@ -1455,7 +1526,7 @@ pub struct MemoryCopy(Option<MemoryIndex>);
 impl ValidateInstruction for MemoryCopy {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let _ = ctx.get_memory(self.0)?;
+        let _ = ctx.get_memory(self.0.map(Index::Index).as_ref())?;
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
@@ -1470,8 +1541,8 @@ pub struct MemoryInit {
 impl ValidateInstruction for MemoryInit {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let _ = ctx.get_memory(self.memory)?;
-        let _ = ctx.get_data(self.data)?;
+        let _ = ctx.get_memory(self.memory.map(Index::Index).as_ref())?;
+        let _ = ctx.get_data(&Index::Index(self.data))?;
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
@@ -1485,7 +1556,7 @@ pub struct DataDrop {
 impl ValidateInstruction for DataDrop {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let _ = ctx.get_data(self.data)?;
+        let _ = ctx.get_data(&Index::Index(self.data))?;
         Ok(vec![])
     }
 }
@@ -1512,21 +1583,19 @@ pub struct UnreachableOperation;
 impl ValidateInstruction for UnreachableOperation {
     // type Output = Vec<ValueType>;
     fn validate(&self, _: &mut Context, _input: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        // What? I can take all types and return all types?
         // https://webassembly.github.io/spec/core/valid/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-unreachable
-        // I think what this means is that we don't take any types or values
-        // What we really do is consume them all...
-        todo!()
+        Ok(vec![])
     }
 }
 
 // block _blocktype_ _instr_* end
 #[derive(Clone, Default)]
 pub struct BlockOperation {
-    id: Option<String>,
+    label: Option<String>,
+    // id: Option<String>,
     ty: BlockType,
     // instructions: InstructionSequence,
-    op: Box<Opcode>,
+    ops: Vec<Box<Opcode>>,
 }
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BlockOperation {
     fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
@@ -1534,17 +1603,25 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BlockOperation 
             return Ok(BlockOperation::default());
         }
         // Copied from FunctionDefinition
-        let id = get_id(tokens);
+        let label = get_id(tokens);
+
         if tokens.peek().copied().expect_right_paren().is_ok() {
             return Ok(BlockOperation {
-                id,
+                label,
                 ..Default::default()
             });
         }
 
         let ty = BlockType::parse(tokens)?;
-        let op = Box::new(Opcode::parse(tokens)?);
-        Ok(Self { id, ty, op })
+        let mut instructions = vec![];
+        while tokens.peek().copied().expect_left_paren().is_ok() {
+            instructions.push(Box::new(Opcode::parse(tokens)?));
+        }
+        Ok(Self {
+            label,
+            ty,
+            ops: instructions,
+        })
     }
 }
 impl ValidateInstruction for BlockOperation {
@@ -1573,76 +1650,155 @@ impl ValidateInstruction for BlockOperation {
 }
 
 // loop _blocktype_ _instr_* end
+#[derive(Clone, Default)]
 pub struct LoopOperation {
+    label: Option<String>,
     ty: BlockType,
-    instructions: InstructionSequence,
+    ops: Vec<Box<Opcode>>,
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for LoopOperation {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        if tokens.peek().copied().expect_right_paren().is_ok() {
+            return Ok(LoopOperation::default());
+        }
+        let label = get_id(tokens);
+        let ty = BlockType::parse(tokens)?;
+        let mut instructions = vec![];
+        while tokens.peek().copied().expect_left_paren().is_ok() {
+            instructions.push(Box::new(Opcode::parse(tokens)?));
+        }
+        Ok(Self {
+            label,
+            ty,
+            ops: instructions,
+        })
+    }
 }
 impl ValidateInstruction for LoopOperation {
     // type Output = Vec<ValueType>;
 
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        // Block type must be some function type
-        let ty = self.ty.get_function_type(ctx)?;
-        // Prepend return value to this to ctx.labels (aka, this points at ctx.get_labels(0))
-        ctx.prepend_label(ty.output().clone());
-        // TODO(Alec): Validate how to execute instructions
-        let output = self.instructions.validate(ctx, inputs)?;
-        // remove the label
-        let label = ctx.remove_prepend_label()?;
-        if *ty.output() == label && *ty.output().values() == output {
-            // This should never trigger
-            for input_ty in ty.input().values() {
-                let _ = inputs.pop()?.try_into_value_type(&input_ty)?;
-            }
-            return Ok(ty.output().clone().values().to_vec());
-        }
-        Err(ValidationError::new())
+        todo!("Validate loop operations")
+        // // Block type must be some function type
+        // let ty = self.ty.get_function_type(ctx)?;
+        // // Prepend return value to this to ctx.labels (aka, this points at ctx.get_labels(0))
+        // ctx.prepend_label(ty.output().clone());
+        // // TODO(Alec): Validate how to execute instructions
+        // let output = self.instructions.validate(ctx, inputs)?;
+        // // remove the label
+        // let label = ctx.remove_prepend_label()?;
+        // if *ty.output() == label && *ty.output().values() == output {
+        //     // This should never trigger
+        //     for input_ty in ty.input().values() {
+        //         let _ = inputs.pop()?.try_into_value_type(&input_ty)?;
+        //     }
+        //     return Ok(ty.output().clone().values().to_vec());
+        // }
+        // Err(ValidationError::new())
     }
 }
 
 // if _blocktype_ _instr_* else _instr_* end
+#[derive(Clone, Default)]
 pub struct IfOperation {
+    label: Option<String>,
     ty: BlockType,
-    t1: InstructionSequence,
-    t2: InstructionSequence,
+    condition: Option<Box<Opcode>>,
+    thens: Vec<Box<Opcode>>,
+    elses: Vec<Box<Opcode>>,
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for IfOperation {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        if tokens.peek().copied().expect_right_paren().is_ok() {
+            return Ok(IfOperation::default());
+        }
+
+        let label = get_id(tokens);
+        let ty = BlockType::parse(tokens)?;
+
+        let condition = match get_next_keyword(tokens) {
+            Some(Keyword::Then) | Some(Keyword::Else) | None => None,
+            Some(_) => Some(Box::new(Opcode::parse(tokens)?)),
+        };
+
+        let mut thens = vec![];
+        if Some(Keyword::Then) == get_next_keyword(tokens) {
+            tokens.next().expect_left_paren()?;
+            tokens.next().expect_keyword_token(Keyword::Then)?;
+            while tokens.peek().copied().expect_left_paren().is_ok() {
+                thens.push(Box::new(Opcode::parse(tokens)?));
+            }
+            tokens.next().expect_right_paren()?;
+        }
+
+        let mut elses = vec![];
+        if Some(Keyword::Else) == get_next_keyword(tokens) {
+            tokens.next().expect_left_paren()?;
+            tokens.next().expect_keyword_token(Keyword::Else)?;
+            while tokens.peek().copied().expect_left_paren().is_ok() {
+                elses.push(Box::new(Opcode::parse(tokens)?));
+            }
+            tokens.next().expect_right_paren()?;
+        }
+
+        Ok(Self {
+            label,
+            ty,
+            condition,
+            thens,
+            elses,
+        })
+    }
 }
 impl ValidateInstruction for IfOperation {
     // type Output = Vec<ValueType>;
 
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        // Block type must be some function type
-        let ty = self.ty.get_function_type(ctx)?;
-        // Prepend return value to this to ctx.labels (aka, this points at ctx.get_labels(0))
-        ctx.prepend_label(ty.output().clone());
-        // TODO(Alec): Validate how to execute instructions
-        let o1 = self.t1.validate(ctx, inputs)?;
-        let o2 = self.t2.validate(ctx, inputs)?;
-        // remove the label
-        let label = ctx.remove_prepend_label()?;
-        // validate the output matches the functions output
-        if label.values() == o1
-            && label.values() == o2
-            && *ty.output().values() == o1
-            && *ty.output().values() == o2
-        {
-            // validate that the input stack has an i32 and all of of the function types arguments
-            let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
-            for input_ty in ty.input().values() {
-                let _ = inputs.pop()?.try_into_value_type(&input_ty)?;
-            }
-            return Ok(ty.output().clone().values().to_vec());
-        }
-        Err(ValidationError::new())
+        todo!("Validation for if")
+        // // Block type must be some function type
+        // let ty = self.ty.get_function_type(ctx)?;
+        // // Prepend return value to this to ctx.labels (aka, this points at ctx.get_labels(0))
+        // ctx.prepend_label(ty.output().clone());
+        // // TODO(Alec): Validate how to execute instructions
+        // let o1 = self.t1.validate(ctx, inputs)?;
+        // let o2 = self.t2.validate(ctx, inputs)?;
+        // // remove the label
+        // let label = ctx.remove_prepend_label()?;
+        // // validate the output matches the functions output
+        // if label.values() == o1
+        //     && label.values() == o2
+        //     && *ty.output().values() == o1
+        //     && *ty.output().values() == o2
+        // {
+        //     // validate that the input stack has an i32 and all of of the function types arguments
+        //     let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
+        //     for input_ty in ty.input().values() {
+        //         let _ = inputs.pop()?.try_into_value_type(&input_ty)?;
+        //     }
+        //     return Ok(ty.output().clone().values().to_vec());
+        // }
+        // Err(ValidationError::new())
     }
 }
-
+#[derive(Clone, Default)]
 pub struct BrOperation {
-    label: LabelIndex,
+    label: Index,
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BrOperation {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        let label = if let Some(label) = get_id(tokens) {
+            Index::Id(label)
+        } else {
+            Index::Index(read_u32(tokens.next().expect_number()?)?)
+        };
+
+        Ok(Self { label })
+    }
 }
 impl ValidateInstruction for BrOperation {
     // type Output = Vec<ValueType>;
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let ty = ctx.get_label(self.label)?;
+        let ty = ctx.get_label(&self.label)?;
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
         for input_ty in ty.values() {
             let _ = inputs.pop()?.try_into_value_type(&input_ty)?;
@@ -1651,13 +1807,25 @@ impl ValidateInstruction for BrOperation {
     }
 }
 
+#[derive(Clone, Default)]
 pub struct BrIfOperation {
-    label: LabelIndex,
+    label: Index,
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BrIfOperation {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        let label = if let Some(label) = get_id(tokens) {
+            Index::Id(label)
+        } else {
+            Index::Index(read_u32(tokens.next().expect_number()?)?)
+        };
+
+        Ok(Self { label })
+    }
 }
 impl ValidateInstruction for BrIfOperation {
     // type Output = Vec<ValueType>;
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let ty = ctx.get_label(self.label)?;
+        let ty = ctx.get_label(&self.label)?;
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
         for input_ty in ty.values() {
             let _ = inputs.pop()?.try_into_value_type(&input_ty)?;
@@ -1668,9 +1836,29 @@ impl ValidateInstruction for BrIfOperation {
 
 ////////////////////////////////////////////////////////////////////////////////
 /// https://webassembly.github.io/spec/core/valid/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-br-table-l-ast-l-n
+#[derive(Clone, Default)]
 pub struct BrTableOperation {
-    labels: Vec<LabelIndex>,
-    label_n: LabelIndex,
+    labels: Vec<Index>,
+    label: Index,
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BrTableOperation {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        let mut labels = vec![];
+        loop {
+            let label = if let Some(label) = get_id(tokens) {
+                Index::Id(label)
+            } else if tokens.peek().copied().expect_number().is_ok() {
+                Index::Index(read_u32(tokens.next().expect_number()?)?)
+            } else {
+                let label = labels.pop().ok_or(Error::new(
+                    None,
+                    "Expected br_table to have at least one label",
+                ))?;
+                return Ok(Self { labels, label });
+            };
+            labels.push(label)
+        }
+    }
 }
 impl ValidateInstruction for BrTableOperation {
     // type Output = Vec<ValueType>;
@@ -1679,10 +1867,10 @@ impl ValidateInstruction for BrTableOperation {
         // performs an indirect branch through an operand indexing into the label
         // vector that is an immediate to the instruction, or to a default target
         // if the operand is out of bounds
-        let ty_n = ctx.get_label(self.label_n)?;
+        let ty_n = ctx.get_label(&self.label)?;
         // validate the rest of the labels exist
         for label in self.labels.iter() {
-            let ty = ctx.get_label(*label)?;
+            let ty = ctx.get_label(label)?;
             if ty.values().len() != ty_n.values().len() {
                 return Err(ValidationError::new());
             }
@@ -1714,6 +1902,7 @@ impl ValidateInstruction for BrTableOperation {
 
 // Come back and review
 // https://webassembly.github.io/spec/core/valid/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-return
+#[derive(Clone, Default)]
 pub struct ReturnOperation;
 impl ValidateInstruction for ReturnOperation {
     // type Output = Vec<ValueType>;

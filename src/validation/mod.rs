@@ -41,7 +41,7 @@
 
 pub mod instruction;
 
-use std::{convert::TryFrom, iter::Peekable};
+use std::{collections::HashMap, convert::TryFrom, iter::Peekable};
 
 use instruction::Const;
 
@@ -51,14 +51,14 @@ use crate::{
         Keyword, Token,
     },
     structure::types::{
-        FunctionIndex, FunctionType, GlobalType, Index, MemoryType, RefType, ResultType, TableType,
-        ValueType,
+        FunctionDefinition, FunctionIndex, FunctionType, GlobalType, Index, MemoryType, RefType,
+        ResultType, TableType, TypeDefinition, ValueType, Variable,
     },
 };
 
 /// Representation of the validation context of a [Data] segment inside of a
 /// Web Assembly [Module].
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Ok {}
 
 impl Ok {
@@ -68,115 +68,156 @@ impl Ok {
 }
 
 #[derive(Clone, Default)]
+pub struct CtxList<T>(Vec<(Option<String>, T)>);
+impl<T> CtxList<T> {
+    pub fn push(&mut self, id: Option<String>, def: T) {
+        self.0.push((id, def))
+    }
+
+    pub fn find(&self, index: &Index) -> Result<&T, ValidationError> {
+        let item = match index {
+            Index::Id(id) => self
+                .0
+                .iter()
+                .find(|i| i.0.as_ref() == Some(id))
+                .ok_or_else(ValidationError::new),
+            Index::Index(i) => {
+                let index = usize::try_from(*i).map_err(|_| ValidationError::new())?;
+                self.0.get(index).ok_or_else(ValidationError::new)
+            }
+        }?;
+        let item = &item.1;
+        Ok(item)
+    }
+}
+
+#[derive(Clone, Default)]
 pub struct Context {
-    types: Vec<FunctionType>,
-    functions: Vec<FunctionType>,
-    tables: Vec<TableType>,
-    memories: Vec<MemoryType>,
-    elements: Vec<RefType>,
-    globals: Vec<GlobalType>,
-    datas: Vec<Ok>,
-    locals: Vec<ValueType>,
-    labels: Vec<ResultType>,
+    types: CtxList<FunctionType>,
+    functions: CtxList<FunctionType>,
+    tables: CtxList<TableType>,
+    memories: CtxList<MemoryType>,
+    elements: CtxList<RefType>,
+    globals: CtxList<GlobalType>,
+    datas: CtxList<Ok>,
+
+    // Used for local functions
+    locals: CtxList<ValueType>,
+    labels: CtxList<ResultType>,
     returning: Option<ResultType>,
+
     references: Vec<FunctionIndex>,
 }
 
 impl Context {
+    pub fn push_type(&mut self, def: &TypeDefinition) {
+        self.types.push(def.id().cloned(), def.ty());
+    }
+
     pub fn get_type(&self, index: &Index) -> Result<&FunctionType, ValidationError> {
-        todo!("Implement getting type from Index which is their id or number");
-        // let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
-        // self.types.get(index).ok_or_else(ValidationError::new)
+        self.types.find(index)
     }
 
-    pub fn get_function(&self, _index: &Index) -> Result<&FunctionType, ValidationError> {
-        todo!("Implement getting functions by their index");
-        // match index {
-        //     Index::Id(id) => todo!(),
-        //     Index::Index(_) => todo!(),
-        // }
-        // let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
-        // self.functions.get(index).ok_or_else(ValidationError::new)
-    }
-
-    pub fn get_element(&self, index: u32) -> Result<&RefType, ValidationError> {
-        let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
-        self.elements.get(index).ok_or_else(ValidationError::new)
-    }
-
-    pub fn get_data(&self, index: u32) -> Result<&Ok, ValidationError> {
-        let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
-        self.datas.get(index).ok_or_else(ValidationError::new)
-    }
-
-    pub fn get_memory(&self, index: Option<u32>) -> Result<&MemoryType, ValidationError> {
-        let i = match index {
-            Some(x) => usize::try_from(x).map_err(|_| ValidationError::new())?,
-            None => 0,
+    pub fn push_function(&mut self, def: &FunctionDefinition) -> Result<(), ValidationError> {
+        let ty = match def.ty_def() {
+            Some(ty) => self.get_type(ty.index())?.clone(),
+            None => def.ty(),
         };
-        self.memories.get(i).ok_or_else(ValidationError::new)
+        self.functions.push(def.id().cloned(), ty);
+        Ok(())
     }
 
-    pub fn get_label(&self, index: u32) -> Result<&ResultType, ValidationError> {
+    pub fn get_function(&self, index: &Index) -> Result<&FunctionType, ValidationError> {
+        self.types.find(index)
+    }
+
+    pub fn get_element(&self, index: &Index) -> Result<&RefType, ValidationError> {
+        self.elements.find(index)
+    }
+
+    pub fn get_data(&self, index: &Index) -> Result<&Ok, ValidationError> {
+        self.datas.find(index)
+    }
+
+    pub fn get_memory(&self, index: Option<&Index>) -> Result<&MemoryType, ValidationError> {
+        let i = match index {
+            Some(id) => id.clone(),
+            None => Index::Index(0),
+        };
+        self.memories.find(&i)
+    }
+
+    pub fn push_local(&mut self, var: &Variable) {
+        self.locals.push(var.id().cloned(), *var.ty())
+    }
+
+    pub fn get_local(&self, index: &Index) -> Result<&ValueType, ValidationError> {
+        self.locals.find(index)
+    }
+
+    pub fn get_label(&self, index: &Index) -> Result<&ResultType, ValidationError> {
         // Note: We are supposed to push labels to the index 0 when we add them,
         // but thats wasteful so here we go, pre-mature optimization! :)
         //
         // We will push and pop labels instead basically meaning the list is in
         // reverse. Meaning indexing will also be in reverse
-        let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
-        if self.labels.is_empty() || self.labels.len() <= index {
-            return Err(ValidationError::new());
-        } else {
-            let max_size = self.labels.len() - 1;
-            self.labels
-                .get(max_size - index)
-                .ok_or_else(ValidationError::new)
-        }
+        self.labels.find(index)
+        // let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
+        // if self.labels.is_empty() || self.labels.len() <= index {
+        //     return Err(ValidationError::new());
+        // } else {
+        //     let max_size = self.labels.len() - 1;
+        //     self.labels
+        //         .get(max_size - index)
+        //         .ok_or_else(ValidationError::new)
+        // }
     }
 
     pub fn prepend_label(&mut self, ty: ResultType) {
-        self.labels.push(ty)
+        todo!("aaahhh")
+        // self.labels.push(ty)
     }
 
     pub fn remove_prepend_label(&mut self) -> Result<ResultType, ValidationError> {
-        self.labels.pop().ok_or_else(ValidationError::new)
+        todo!("remove_prepend_label");
+        // self.labels.pop().ok_or_else(ValidationError::new)
     }
 
-    pub fn get_local(&self, index: u32) -> Result<&ValueType, ValidationError> {
-        let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
-        self.locals.get(index).ok_or_else(ValidationError::new)
-    }
+    // pub fn get_local(&self, index: u32) -> Result<&ValueType, ValidationError> {
+    //     let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
+    //     self.locals.get(index).ok_or_else(ValidationError::new)
+    // }
 
     pub fn set_local(&mut self, index: u32, ty: ValueType) -> Result<(), ValidationError> {
-        let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
-        if self.locals.get(index).is_some() {
-            self.locals[index] = ty;
-            Ok(())
-        } else {
-            Err(ValidationError::new())
-        }
+        todo!("set_local");
+        // let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
+        // if self.locals.get(index).is_some() {
+        //     self.locals[index] = ty;
+        //     Ok(())
+        // } else {
+        //     Err(ValidationError::new())
+        // }
     }
 
-    pub fn get_global(&self, index: u32) -> Result<&GlobalType, ValidationError> {
-        let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
-        self.globals.get(index).ok_or_else(ValidationError::new)
+    pub fn get_global(&self, index: &Index) -> Result<&GlobalType, ValidationError> {
+        self.globals.find(index)
     }
 
     pub fn set_global(&mut self, index: u32, ty: ValueType) -> Result<(), ValidationError> {
-        let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
-        match self.globals.get(index) {
-            Some(GlobalType::Var(_)) => {
-                self.globals[index] = GlobalType::Var(ty);
-                Ok(())
-            }
-            Some(GlobalType::Const(_)) => Err(ValidationError::new()),
-            None => Err(ValidationError::new()),
-        }
+        todo!("set_global")
+        // let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
+        // match self.globals.get(index) {
+        //     Some(GlobalType::Var(_)) => {
+        //         self.globals[index] = GlobalType::Var(ty);
+        //         Ok(())
+        //     }
+        //     Some(GlobalType::Const(_)) => Err(ValidationError::new()),
+        //     None => Err(ValidationError::new()),
+        // }
     }
 
-    pub fn get_table(&self, index: u32) -> Result<&TableType, ValidationError> {
-        let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
-        self.tables.get(index).ok_or_else(ValidationError::new)
+    pub fn get_table(&self, index: &Index) -> Result<&TableType, ValidationError> {
+        self.tables.find(index)
     }
 
     pub fn get_ref(&self, index: u32) -> Option<&FunctionIndex> {
@@ -188,39 +229,39 @@ impl Context {
         self.references.contains(&arg)
     }
 
+    pub fn set_returning(&mut self, opt: Option<ResultType>) {
+        self.returning = opt;
+    }
+
     pub fn returning(&self) -> Option<&ResultType> {
         self.returning.as_ref()
     }
 
-    pub fn prepare_function_execution(&mut self, locals: Vec<ValueType>, ty: &FunctionType) {
-        self.locals = locals;
-        self.labels = vec![ty.output().clone()];
-        self.returning = Some(ty.output().clone());
-    }
+    // pub fn prepare_function_execution(&mut self, locals: Vec<ValueType>, ty: &FunctionType) {
+    //     self.locals = locals;
+    //     self.labels = vec![ty.output().clone()];
+    //     self.returning = Some(ty.output().clone());
+    // }
 
-    pub fn types(&self) -> &[FunctionType] {
-        &self.types
-    }
+    // pub fn functions(&self) -> &Vec<FunctionType> {
+    //     &self.functions
+    // }
 
-    pub fn functions(&self) -> &Vec<FunctionType> {
-        &self.functions
-    }
+    // pub fn locals(&self) -> &[ValueType] {
+    //     &self.locals
+    // }
 
-    pub fn locals(&self) -> &[ValueType] {
-        &self.locals
-    }
+    // pub fn labels(&self) -> &[ResultType] {
+    //     &self.labels
+    // }
 
-    pub fn labels(&self) -> &[ResultType] {
-        &self.labels
-    }
+    // pub fn datas(&self) -> &[Ok] {
+    //     &self.datas
+    // }
 
-    pub fn datas(&self) -> &[Ok] {
-        &self.datas
-    }
-
-    pub fn memories(&self) -> &[MemoryType] {
-        &self.memories
-    }
+    // pub fn memories(&self) -> &[MemoryType] {
+    //     &self.memories
+    // }
 }
 
 pub trait Validation<Extra> {
@@ -228,6 +269,7 @@ pub trait Validation<Extra> {
     fn validate(&self, ctx: &Context, args: Extra) -> Result<(), ValidationError>;
 }
 
+#[derive(Debug)]
 pub enum ValidationErrorTy {
     MultipleMemories,
 }
@@ -241,6 +283,7 @@ impl ToString for ValidationErrorTy {
     }
 }
 
+#[derive(Debug)]
 pub struct ValidationError {
     error: Option<String>,
     ty: Option<ValidationErrorTy>,

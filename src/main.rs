@@ -141,9 +141,14 @@ impl Options {
         //     print_tee(&tee);
         //     println!("---")
         // }
+        let mut last_parsed_module = None;
         while iter.peek().is_some() {
-            match parse_module_test(&mut iter) {
-                Ok(_) => println!("Passed Test..."),
+            match parse_module_test(&mut iter, last_parsed_module.as_ref()) {
+                Ok(Some(module)) => {
+                    last_parsed_module = Some(module);
+                    println!("Module parsed successfully...");
+                }
+                Ok(None) => println!("Passed Test..."),
                 Err(err) => {
                     let range = if let Some(token) = &err.token() {
                         if let Some(index) = tokens.iter().position(|t| t == *token) {
