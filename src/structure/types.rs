@@ -34,53 +34,56 @@ pub enum HalfType {
 #[derive(Clone)]
 pub enum BlockType {
     Index(Index),
-    Value(Option<FunctionType>),
+    Value(Vec<Variable>), // return variables
 }
-impl Default for BlockType {
-    fn default() -> Self {
-        Self::Value(None)
+impl std::fmt::Display for BlockType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BlockType::Index(obj) => write!(f, "(type {})", obj),
+            BlockType::Value(onj) => {
+                let results = onj
+                    .iter()
+                    .map(|v| v.ty().to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                write!(f, "(result {})", results)
+            }
+        }
     }
 }
-/*
-if Some(Keyword::Type) == get_next_keyword(tokens) {
-            return Ok(BlockType::Index(TypeUse::parse(tokens)?.0));
-        } else if Some(Keyword::Result) == get_next_keyword(tokens) {
-            let mut result = FuncResult::parse(tokens)?.0;
-            let ty = result.pop().map(|ty| *ty.ty());
-            if !result.is_empty() {
-                return Err(Error::new(
-                    tokens.next().cloned(),
-                    "Select result block has too many arguments".to_string(),
-                ));
-            }
-            return Ok(Self::Value(ty));
-        }
-        Ok(BlockType::Value(None)) */
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BlockType {
     fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
-        if Some(Keyword::Type) == get_next_keyword(tokens) {
-            return Ok(BlockType::Index(TypeUse::parse(tokens)?.0));
+        match get_next_keyword(tokens) {
+            Some(Keyword::Type) => Ok(BlockType::Index(TypeUse::parse(tokens)?.0)),
+            Some(Keyword::Result) => {
+                let mut results = vec![];
+                while Some(Keyword::Result) == get_next_keyword(tokens) {
+                    results.extend(FuncResult::parse(tokens)?.0);
+                }
+                Ok(BlockType::Value(results))
+            }
+            Some(keyword) => Err(Error::new(
+                tokens.skip(1).next().cloned(),
+                format!(
+                    "keyword {:?} was not expected for 'block' return type",
+                    keyword
+                ),
+            )),
+            None => Err(Error::new(
+                tokens.next().cloned(),
+                format!("keyword was not found for 'block' return type"),
+            )),
         }
-        let mut params = vec![];
-        // while Some(Keyword::Param) == get_next_keyword(tokens) {
-        //     params.extend(FuncParam::parse(tokens)?.var);
-        // }
-        let mut results = vec![];
-        while Some(Keyword::Result) == get_next_keyword(tokens) {
-            results.extend(FuncResult::parse(tokens)?.0);
-        }
-        Ok(BlockType::Value(Some(FunctionType::new(
-            ResultType::new(params),
-            ResultType::new(results),
-        ))))
     }
 }
 impl BlockType {
     pub fn get_function_type(&self, ctx: &Context) -> Result<FunctionType, ValidationError> {
         match self {
             BlockType::Index(index) => ctx.get_type(index).cloned(),
-            BlockType::Value(Some(value)) => Ok(value.clone()),
-            BlockType::Value(None) => Ok(FunctionType::empty()),
+            BlockType::Value(value) => Ok(FunctionType::new(
+                ResultType::new(vec![]),
+                ResultType::new(value.clone()),
+            )),
         }
     }
 }
@@ -862,6 +865,14 @@ pub enum IntType {
     I32,
     I64,
 }
+impl std::fmt::Display for IntType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IntType::I32 => write!(f, "i32"),
+            IntType::I64 => write!(f, "i62"),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FloatType {
@@ -1204,6 +1215,12 @@ impl ValidateInstruction for Instruction {
     }
 }
 impl Instruction {
+    pub fn new() -> Self {
+        Self {
+            instructions: vec![],
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.instructions.is_empty()
     }

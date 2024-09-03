@@ -9,7 +9,7 @@ use crate::{
     structure::{
         module::{get_id, get_next_keyword},
         types::{
-            BlockType, DataIndex, ElementIndex, FloatVectorShape, FuncResult, FunctionIndex,
+            self, BlockType, DataIndex, ElementIndex, FloatVectorShape, FuncResult, FunctionIndex,
             FunctionReference, GlobalType, HalfType, Index, Instruction, IntType,
             IntegerVectorShape, LabelIndex, LocalIndex, MemoryArgument, MemoryIndex,
             MemoryLoadNumber, MemoryWidth, MemoryZeroWidth, NumType, RefType, SignType, TableIndex,
@@ -470,6 +470,22 @@ pub enum UnaryFunction {
     Trunc,
     Nearest,
 }
+impl std::fmt::Display for UnaryFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UnaryFunction::Clz => write!(f, "clz"),
+            UnaryFunction::Ctz => write!(f, "ctz"),
+            UnaryFunction::PopCnt => write!(f, "popcnt"),
+            UnaryFunction::Abs => write!(f, "abs"),
+            UnaryFunction::Neg => write!(f, "neg"),
+            UnaryFunction::Sqrt => write!(f, "sqrt"),
+            UnaryFunction::Ceil => write!(f, "ceil"),
+            UnaryFunction::Floor => write!(f, "floor"),
+            UnaryFunction::Trunc => write!(f, "trunc"),
+            UnaryFunction::Nearest => write!(f, "nearest"),
+        }
+    }
+}
 
 // Validate Unary Operations. Only available for numbers.
 #[derive(Clone)]
@@ -477,10 +493,14 @@ pub struct UnaryOperation {
     ty: NumType,
     op: UnaryFunction,
 }
-
 impl UnaryOperation {
     pub fn new(ty: impl Into<NumType>, op: UnaryFunction) -> Self {
         Self { ty: ty.into(), op }
+    }
+}
+impl std::fmt::Display for UnaryOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}.{})", self.ty, self.op)
     }
 }
 impl ValidateInstruction for UnaryOperation {
@@ -507,6 +527,13 @@ impl Execute for UnaryOperation {
 pub enum BinaryFunction {
     Add(IntType),
 }
+impl std::fmt::Display for BinaryFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BinaryFunction::Add(ty) => write!(f, "{}.add", ty),
+        }
+    }
+}
 impl Default for BinaryFunction {
     fn default() -> Self {
         Self::Add(IntType::default())
@@ -516,10 +543,14 @@ impl Default for BinaryFunction {
 pub struct BinaryOperation {
     func: BinaryFunction,
 }
-
 impl BinaryOperation {
     pub fn new(func: BinaryFunction) -> Self {
         Self { func }
+    }
+}
+impl std::fmt::Display for BinaryOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({})", self.func)
     }
 }
 impl ValidateInstruction for BinaryOperation {
@@ -543,6 +574,11 @@ pub struct TestOperation {
 impl TestOperation {
     pub fn new(ty: IntType) -> Self {
         Self { ty }
+    }
+}
+impl std::fmt::Display for TestOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}.eqz)", self.ty)
     }
 }
 impl ValidateInstruction for TestOperation {
@@ -1638,7 +1674,7 @@ impl ValidateInstruction for UnreachableOperation {
 #[derive(Clone, Default)]
 pub struct BlockOperation {
     label: Option<String>,
-    ty: BlockType,
+    ty: Option<BlockType>,
     ops: Instruction,
 }
 impl std::fmt::Display for BlockOperation {
@@ -1647,9 +1683,17 @@ impl std::fmt::Display for BlockOperation {
         if let Some(label) = self.label.as_ref() {
             write!(f, " ${}", label)?;
         }
-        write!(" ")
-
-        write!(f, ")")
+        if let Some(ty) = self.ty.as_ref() {
+            write!(f, " {}", ty)?;
+        }
+        if self.ops.is_empty() {
+            write!(f, ")")
+        } else {
+            f.pad(&" ".repeat(2))?;
+            write!(f, "\n{}", self.ops)?;
+            f.pad(&" ".repeat(4))?;
+            write!(f, ")")
+        }
     }
 }
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BlockOperation {
@@ -1659,7 +1703,6 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BlockOperation 
         }
         // Copied from FunctionDefinition
         let label = get_id(tokens);
-        let id = None;
 
         if tokens.peek().copied().expect_right_paren().is_ok() {
             return Ok(BlockOperation {
@@ -1668,7 +1711,11 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BlockOperation 
             });
         }
 
-        let ty = BlockType::parse(tokens)?;
+        let ty = match get_next_keyword(tokens) {
+            Some(Keyword::Type) => Some(BlockType::parse(tokens)?),
+            Some(Keyword::Result) => Some(BlockType::parse(tokens)?),
+            _ => None,
+        };
         let ops = Instruction::parse(tokens)?;
 
         Ok(Self { label, ty, ops })
@@ -1679,9 +1726,10 @@ impl ValidateInstruction for BlockOperation {
 
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         // Block type must be some function type
-        let ty = self.ty.get_function_type(ctx)?;
+        todo!("validate meeee");
+        // let ty = self.ty.get_function_type(ctx)?;
         // Prepend return value to this to ctx.labels (aka, this points at ctx.get_labels(0))
-        ctx.prepend_label(ty.output().clone());
+        // ctx.prepend_label(ty.output().clone());
         // TODO(Alec): Validate how to execute instructions
         todo!("implement instructions for a given opcode for a block");
         // let output = self.instructions.validate(ctx, inputs)?;
@@ -1703,8 +1751,25 @@ impl ValidateInstruction for BlockOperation {
 #[derive(Clone, Default)]
 pub struct LoopOperation {
     label: Option<String>,
-    ty: BlockType,
-    ops: Vec<Box<Operation>>,
+    ty: Option<BlockType>,
+    ops: Instruction,
+}
+impl std::fmt::Display for LoopOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(loop")?;
+        if let Some(label) = self.label.as_ref() {
+            write!(f, " ${}", label)?;
+        }
+        if let Some(ty) = self.ty.as_ref() {
+            write!(f, " {}", ty)?;
+        }
+        if self.ops.is_empty() {
+            write!(f, ")")
+        } else {
+            writeln!(f, "{}", self.ops)?;
+            write!(f, ")")
+        }
+    }
 }
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for LoopOperation {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
@@ -1712,11 +1777,12 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for LoopOperation {
             return Ok(LoopOperation::default());
         }
         let label = get_id(tokens);
-        let ty = BlockType::parse(tokens)?;
-        let mut instructions = vec![];
-        while tokens.peek().copied().expect_left_paren().is_ok() {
-            instructions.push(Box::new(Operation::parse(tokens)?));
-        }
+        let ty = match get_next_keyword(tokens) {
+            Some(Keyword::Type) => Some(BlockType::parse(tokens)?),
+            Some(Keyword::Result) => Some(BlockType::parse(tokens)?),
+            _ => None,
+        };
+        let instructions = Instruction::parse(tokens)?;
         Ok(Self {
             label,
             ty,
@@ -1752,10 +1818,38 @@ impl ValidateInstruction for LoopOperation {
 #[derive(Clone, Default)]
 pub struct IfOperation {
     label: Option<String>,
-    ty: BlockType,
-    condition: Option<Box<Operation>>,
-    thens: Vec<Box<Operation>>,
-    elses: Vec<Box<Operation>>,
+    ty: Option<BlockType>,
+    condition: Option<Instruction>,
+    thens: Instruction,
+    elses: Option<Instruction>,
+}
+impl std::fmt::Display for IfOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(if")?;
+        if let Some(label) = self.label.as_ref() {
+            write!(f, " ${}", label)?;
+        }
+        if let Some(ty) = self.ty.as_ref() {
+            write!(f, " {}", ty)?;
+        }
+        if let Some(condition) = self.condition.as_ref() {
+            write!(f, "{}", condition)?;
+        }
+        if self.thens.is_empty() {
+            writeln!(f, "(then)")?;
+        } else {
+            writeln!(f, "(then {})", self.thens)?;
+        }
+        if let Some(elses) = self.elses.as_ref() {
+            if elses.is_empty() {
+                writeln!(f, "(else)")?;
+            } else {
+                writeln!(f, "(else {})", elses)?;
+            }
+        }
+
+        Ok(())
+    }
 }
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for IfOperation {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
@@ -1764,32 +1858,34 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for IfOperation {
         }
 
         let label = get_id(tokens);
-        let ty = BlockType::parse(tokens)?;
+        let ty = match get_next_keyword(tokens) {
+            Some(Keyword::Type) => Some(BlockType::parse(tokens)?),
+            Some(Keyword::Result) => Some(BlockType::parse(tokens)?),
+            _ => None,
+        };
 
         let condition = match get_next_keyword(tokens) {
             Some(Keyword::Then) | Some(Keyword::Else) | None => None,
-            Some(_) => Some(Box::new(Operation::parse(tokens)?)),
+            Some(_) => Some(Instruction::parse(tokens)?),
         };
 
-        let mut thens = vec![];
-        if Some(Keyword::Then) == get_next_keyword(tokens) {
-            tokens.next().expect_left_paren()?;
-            tokens.next().expect_keyword_token(Keyword::Then)?;
-            while tokens.peek().copied().expect_left_paren().is_ok() {
-                thens.push(Box::new(Operation::parse(tokens)?));
-            }
-            tokens.next().expect_right_paren()?;
+        let mut thens = Instruction::new();
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::Then)?;
+        if !tokens.peek().copied().expect_right_paren().is_ok() {
+            thens = Instruction::parse(tokens)?;
         }
+        tokens.next().expect_right_paren()?;
 
-        let mut elses = vec![];
+        let mut elses = None;
         if Some(Keyword::Else) == get_next_keyword(tokens) {
             tokens.next().expect_left_paren()?;
             tokens.next().expect_keyword_token(Keyword::Else)?;
-            while tokens.peek().copied().expect_left_paren().is_ok() {
-                elses.push(Box::new(Operation::parse(tokens)?));
+            if !tokens.peek().copied().expect_right_paren().is_ok() {
+                elses = Some(Instruction::parse(tokens)?);
             }
             tokens.next().expect_right_paren()?;
-        }
+        };
 
         Ok(Self {
             label,
@@ -1834,6 +1930,11 @@ impl ValidateInstruction for IfOperation {
 pub struct BrOperation {
     label: Index,
 }
+impl std::fmt::Display for BrOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(br {})", self.label)
+    }
+}
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BrOperation {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
         let label = if let Some(label) = get_id(tokens) {
@@ -1860,6 +1961,11 @@ impl ValidateInstruction for BrOperation {
 #[derive(Clone, Default)]
 pub struct BrIfOperation {
     label: Index,
+}
+impl std::fmt::Display for BrIfOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(br_if {})", self.label)
+    }
 }
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BrIfOperation {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
@@ -1889,7 +1995,17 @@ impl ValidateInstruction for BrIfOperation {
 #[derive(Clone, Default)]
 pub struct BrTableOperation {
     labels: Vec<Index>,
-    label: Index,
+}
+impl std::fmt::Display for BrTableOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let labels = self
+            .labels
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        write!(f, "(br_table {})", labels)
+    }
 }
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BrTableOperation {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
@@ -1900,11 +2016,14 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BrTableOperatio
             } else if tokens.peek().copied().expect_number().is_ok() {
                 Index::Index(read_u32(tokens.next().expect_number()?)?)
             } else {
-                let label = labels.pop().ok_or(Error::new(
-                    None,
-                    "Expected br_table to have at least one label",
-                ))?;
-                return Ok(Self { labels, label });
+                return if labels.is_empty() {
+                    Err(Error::new(
+                        tokens.next().cloned(),
+                        "Expected there to be more labels for br_table operation",
+                    ))
+                } else {
+                    Ok(Self { labels })
+                };
             };
             labels.push(label)
         }
@@ -1917,35 +2036,36 @@ impl ValidateInstruction for BrTableOperation {
         // performs an indirect branch through an operand indexing into the label
         // vector that is an immediate to the instruction, or to a default target
         // if the operand is out of bounds
-        let ty_n = ctx.get_label(&self.label)?;
-        // validate the rest of the labels exist
-        for label in self.labels.iter() {
-            let ty = ctx.get_label(label)?;
-            if ty.values().len() != ty_n.values().len() {
-                return Err(ValidationError::new());
-            }
-            for index in ty.values().len()..0 {
-                let value = inputs
-                    .0
-                    .get(index - inputs.0.len())
-                    .ok_or_else(ValidationError::new)?;
-                value.try_into_value_type(
-                    ty.values().get(index).ok_or_else(ValidationError::new)?,
-                )?;
-            }
-        }
-        // There must be enough input as expected in `ty_n`
-        if ty_n.values().len() > inputs.0.len() {
-            return Err(ValidationError::new());
-        }
-        let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
-        for index in ty_n.values().len()..0 {
-            let _ = inputs
-                .pop()?
-                .try_into_value_type(ty_n.values().get(index).unwrap())?;
-        }
+        todo!("re-evaluate br_table rules");
+        // let ty_n = ctx.get_label(&self.label)?;
+        // // validate the rest of the labels exist
+        // for label in self.labels.iter() {
+        //     let ty = ctx.get_label(label)?;
+        //     if ty.values().len() != ty_n.values().len() {
+        //         return Err(ValidationError::new());
+        //     }
+        //     for index in ty.values().len()..0 {
+        //         let value = inputs
+        //             .0
+        //             .get(index - inputs.0.len())
+        //             .ok_or_else(ValidationError::new)?;
+        //         value.try_into_value_type(
+        //             ty.values().get(index).ok_or_else(ValidationError::new)?,
+        //         )?;
+        //     }
+        // }
+        // // There must be enough input as expected in `ty_n`
+        // if ty_n.values().len() > inputs.0.len() {
+        //     return Err(ValidationError::new());
+        // }
+        // let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
+        // for index in ty_n.values().len()..0 {
+        //     let _ = inputs
+        //         .pop()?
+        //         .try_into_value_type(ty_n.values().get(index).unwrap())?;
+        // }
 
-        Ok(ty_n.values().to_vec())
+        // Ok(ty_n.values().to_vec())
     }
 }
 ////////////////////////////////////////////////////////////////////////////////
@@ -1954,6 +2074,11 @@ impl ValidateInstruction for BrTableOperation {
 // https://webassembly.github.io/spec/core/valid/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-return
 #[derive(Clone, Default)]
 pub struct ReturnOperation;
+impl std::fmt::Display for ReturnOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(return)")
+    }
+}
 impl ValidateInstruction for ReturnOperation {
     // type Output = Vec<ValueType>;
 
@@ -1969,6 +2094,11 @@ impl ValidateInstruction for ReturnOperation {
 #[derive(Clone)]
 pub struct CallOperation {
     index: Index,
+}
+impl std::fmt::Display for CallOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(call {})", self.index)
+    }
 }
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for CallOperation {
     fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
