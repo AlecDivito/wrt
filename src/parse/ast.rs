@@ -342,7 +342,7 @@ pub fn walk_tee(tee: &Tee, passed: Option<&Module>) -> Result<Option<Module>, Er
     let mut module = None;
     match tee.root() {
         Keyword::Module => {
-            module = Some(Module::visit(tee)?);
+            // module = Some(Module::visit(tee)?);
         }
         // Keyword::AssertMalformed => AssertMalformed::visit(tee)?.test()?,
         // Keyword::AssertInvalid => AssertInvalid::visit(tee)?.test()?,

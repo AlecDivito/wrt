@@ -9,11 +9,11 @@ use crate::{
     structure::{
         module::{get_id, get_next_keyword},
         types::{
-            self, BlockType, DataIndex, ElementIndex, FloatVectorShape, FuncResult, FunctionIndex,
+            BlockType, DataIndex, ElementIndex, FloatVectorShape, FuncResult, FunctionIndex,
             FunctionReference, GlobalType, HalfType, Index, Instruction, IntType,
-            IntegerVectorShape, LabelIndex, LocalIndex, MemoryArgument, MemoryIndex,
-            MemoryLoadNumber, MemoryWidth, MemoryZeroWidth, NumType, RefType, SignType, TableIndex,
-            TypeIndex, ValueType, VecType, VectorMemoryOp, VectorShape,
+            IntegerVectorShape, LocalIndex, MemoryArgument, MemoryIndex, MemoryLoadNumber,
+            MemoryWidth, MemoryZeroWidth, NumType, RefType, SignType, TableIndex, TypeIndex,
+            ValueType, VecType, VectorMemoryOp, VectorShape,
         },
     },
 };
@@ -412,6 +412,14 @@ pub trait Execute {
 pub struct Const {
     ty: NumType,
     value: Number,
+}
+impl Default for Const {
+    fn default() -> Self {
+        Self {
+            ty: NumType::I32,
+            value: Number::I32(0),
+        }
+    }
 }
 impl std::fmt::Display for Const {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1115,8 +1123,9 @@ impl std::fmt::Display for LocalGetOperation {
 }
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for LocalGetOperation {
     fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
-        let index = Index::Index(read_u32(tokens.next().expect_number()?)?);
-        Ok(Self { index })
+        Ok(Self {
+            index: Index::parse(tokens)?,
+        })
     }
 }
 impl ValidateInstruction for LocalGetOperation {

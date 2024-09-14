@@ -1,6 +1,6 @@
 use crate::{
     parse::{
-        ast::{read_u32, Error, Expect, Tee, TryGet, Visit},
+        ast::{read_u32, Error, Expect, TryGet},
         Keyword, TokenType,
     },
     validation::instruction::{Const, Operation},
@@ -14,13 +14,10 @@ use crate::{
     },
 };
 
-use super::{
-    types::{
-        FunctionDefinition, FunctionIndex, FunctionType, GlobalIndex, GlobalType, Index, Limit,
-        MemoryIndex, MemoryOpts, MemoryType, RefType, StartOpts, TableIndex, TableType,
-        TypeDefinition, TypeIndex, ValueType,
-    },
-    util::IndexedVec,
+use super::types::{
+    DataDefinition, FunctionDefinition, FunctionIndex, FunctionType, GlobalDefinition, GlobalIndex,
+    GlobalType, Index, Limit, MemoryIndex, MemoryOpts, MemoryType, RefType, StartOpts,
+    TableDefinition, TableIndex, TableType, TypeDefinition, TypeIndex, TypeUse, ValueType,
 };
 
 pub enum FnType {
@@ -116,42 +113,6 @@ impl ValidateInstruction for Memory {
     }
 }
 
-// Store the type of global. Initialize it by evaluating the globals expression.
-pub struct Global {
-    id: Option<String>,
-    ty: GlobalType,
-    // Requirement, must be a constant initializer expression.
-    init: Const,
-}
-
-impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Global {
-    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
-        tokens.next().expect_left_paren()?;
-        tokens.next().expect_keyword_token(Keyword::Global)?;
-        let id = get_id(tokens);
-        let init = Const::parse(tokens)?;
-        let ty = GlobalType::parse(tokens)?;
-        tokens.next().expect_right_paren()?;
-        Ok(Self { id, ty, init })
-    }
-}
-
-impl ValidateInstruction for Global {
-    fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        self.ty.validate(ctx, ())?;
-        // TODO(Alec): The expression must be a constant expressions only
-        // Add validation for the condition above
-        let mut output = self.init.validate(ctx, inputs)?;
-        if output.len() == 1 {
-            let ty = output.pop().unwrap();
-            self.ty.validate(ctx, ty)?;
-            Ok(vec![])
-        } else {
-            Err(ValidationError::new())
-        }
-    }
-}
-
 // Element Mode
 pub enum ElementMode {
     // Can copy to a table using `table.init`
@@ -211,16 +172,23 @@ impl ValidateInstruction for Element {
 }
 
 /// Data mode type
+#[derive(Clone)]
 pub enum DataMode {
     // Can copy memory using `memory.init`
     Passive,
     // Copy contents into a memory during instantiation, specified by the
     // memory index.
     Active {
-        memory: MemoryIndex,
+        memory: Index,
         // Expression must be a constant expression that defines an offset into memory.
         offset: Const,
     },
+}
+
+impl Default for DataMode {
+    fn default() -> Self {
+        Self::Passive
+    }
 }
 
 /// Can be used to initialize a range of memory from a static vector of types.
@@ -236,7 +204,7 @@ impl ValidateInstruction for Data {
         match &self.mode {
             DataMode::Passive => Ok(vec![]),
             DataMode::Active { memory, offset } => {
-                let _ = ctx.get_memory(Some(&Index::Index(*memory)))?;
+                let _ = ctx.get_memory(Some(&memory))?;
                 let mut output = offset.validate(ctx, inputs)?;
                 output
                     .pop()
@@ -267,31 +235,67 @@ impl ValidateInstruction for StartFunction {
 }
 
 /// The index to the implementation of the type of export required.
+#[derive(Debug, Clone)]
 pub enum ExportDescription {
-    Func(FunctionIndex),
-    Table(TableIndex),
-    Memory(MemoryIndex),
-    Global(GlobalIndex),
+    Func(Index),
+    Table(Index),
+    Memory(Index),
+    Global(Index),
 }
 
 impl ValidateInstruction for ExportDescription {
     fn validate(&self, ctx: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
         match self {
             ExportDescription::Func(index) => {
-                ctx.get_function(&Index::Index(*index))?.validate(ctx, ())?;
+                ctx.get_function(index)?.validate(ctx, ())?;
             }
             ExportDescription::Table(index) => {
-                ctx.get_table(&Index::Index(*index))?.validate(ctx, ())?;
+                ctx.get_table(index)?.validate(ctx, ())?;
             }
             ExportDescription::Memory(index) => {
-                ctx.get_memory(Some(&Index::Index(*index)))?
-                    .validate(ctx, ())?;
+                ctx.get_memory(Some(index))?.validate(ctx, ())?;
             }
             ExportDescription::Global(index) => {
-                ctx.get_global(&Index::Index(*index))?.validate(ctx, ())?;
+                ctx.get_global(index)?.validate(ctx, ())?;
             }
         };
         Ok(vec![])
+    }
+}
+
+impl std::fmt::Display for ExportDescription {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExportDescription::Func(idx) => write!(f, "(func {})", idx),
+            ExportDescription::Table(idx) => write!(f, "(table {})", idx),
+            ExportDescription::Memory(idx) => write!(f, "(memory {})", idx),
+            ExportDescription::Global(idx) => write!(f, "(global {})", idx),
+        }
+    }
+}
+
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for ExportDescription {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        tokens.next().expect_left_paren()?;
+        let keyword = tokens.next().expect_keyword()?;
+        let id = Index::parse(tokens)?;
+        let description = match keyword {
+            Keyword::Func => ExportDescription::Func(id),
+            Keyword::Table => ExportDescription::Table(id),
+            Keyword::Memory => ExportDescription::Memory(id),
+            Keyword::Global => ExportDescription::Global(id),
+            keyword => {
+                return Err(Error::new(
+                    tokens.next().cloned(),
+                    format!(
+                        "Expected Export Description but found {:?} instead",
+                        keyword
+                    ),
+                ))
+            }
+        };
+        tokens.next().expect_right_paren()?;
+        Ok(description)
     }
 }
 
@@ -315,33 +319,103 @@ impl ValidateInstruction for Export {
     }
 }
 
+impl std::fmt::Display for Export {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(export \"{}\" {})", self.name, self.description)
+    }
+}
+
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Export {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        tokens.next().expect_left_paren()?;
+        let keyword = tokens.next().expect_keyword_token(Keyword::Export)?;
+        let name = tokens.next().expect_string()?;
+        let description = ExportDescription::parse(tokens)?;
+        tokens.next().expect_right_paren()?;
+        Ok(Self { name, description })
+    }
+}
+
 /// The index of the expected type that definition should provide and match during
 /// instantiation.
-pub enum ImportDescription {
-    Func(FunctionIndex),
-    Table(TableIndex),
-    Memory(MemoryIndex),
-    Global(GlobalIndex),
+#[derive(Debug, Clone)]
+pub struct ImportDescription {
+    id: Option<String>,
+    ty: ImportDescriptionType,
+}
+
+#[derive(Debug, Clone)]
+enum ImportDescriptionType {
+    Func(TypeUse),
+    Table(TableType),
+    Memory(MemoryType),
+    Global(GlobalType),
 }
 
 impl ValidateInstruction for ImportDescription {
     fn validate(&self, ctx: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        match self {
-            ImportDescription::Func(index) => {
-                ctx.get_function(&Index::Index(*index))?.validate(ctx, ())?;
-            }
-            ImportDescription::Table(index) => {
-                ctx.get_table(&Index::Index(*index))?.validate(ctx, ())?;
-            }
-            ImportDescription::Memory(index) => {
-                ctx.get_memory(Some(&Index::Index(*index)))?
-                    .validate(ctx, ())?;
-            }
-            ImportDescription::Global(index) => {
-                ctx.get_global(&Index::Index(*index))?.validate(ctx, ())?;
+        todo!("help");
+        // match self.ty {
+        //     ImportDescriptionType::Func(index) => {
+        //         ctx.get_function(&Index::Index(*index))?.validate(ctx, ())?;
+        //     }
+        //     ImportDescriptionType::Table(index) => {
+        //         ctx.get_table(&Index::Index(*index))?.validate(ctx, ())?;
+        //     }
+        //     ImportDescriptionType::Memory(index) => {
+        //         ctx.get_memory(Some(&Index::Index(*index)))?
+        //             .validate(ctx, ())?;
+        //     }
+        //     ImportDescriptionType::Global(index) => {
+        //         ctx.get_global(&Index::Index(*index))?.validate(ctx, ())?;
+        //     }
+        // };
+        Ok(vec![])
+    }
+}
+
+impl std::fmt::Display for ImportDescription {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let id = match self.id.as_ref() {
+            Some(id) => format!(" ${} ", id),
+            None => " ".to_string(),
+        };
+        match &self.ty {
+            ImportDescriptionType::Func(item) => write!(f, "(func{}{})", id, item),
+            ImportDescriptionType::Table(item) => write!(f, "(table{}{})", id, item),
+            ImportDescriptionType::Memory(item) => write!(f, "(memory{}{})", id, item),
+            ImportDescriptionType::Global(item) => write!(f, "(global{}{})", id, item),
+        }
+    }
+}
+
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for ImportDescription {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        tokens.next().expect_left_paren()?;
+        let keyword = tokens.next().expect_keyword()?;
+        let id = get_id(tokens);
+
+        let description = match keyword {
+            Keyword::Func => ImportDescriptionType::Func(TypeUse::parse(tokens)?),
+            Keyword::Table => ImportDescriptionType::Table(TableType::parse(tokens)?),
+            Keyword::Memory => ImportDescriptionType::Memory(MemoryType::parse(tokens)?),
+            Keyword::Global => ImportDescriptionType::Global(GlobalType::parse(tokens)?),
+            value => {
+                return Err(Error::new(
+                    tokens.next().cloned(),
+                    format!(
+                        "Failed to parse Import Description. Did not expect keyword {:?}",
+                        value
+                    ),
+                ))
             }
         };
-        Ok(vec![])
+
+        tokens.next().expect_right_paren()?;
+        Ok(Self {
+            id,
+            ty: description,
+        })
     }
 }
 
@@ -365,24 +439,23 @@ impl ValidateInstruction for Import {
     }
 }
 
+impl std::fmt::Display for Import {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "(import \"{}\" \"{}\" {})",
+            self.module, self.name, self.description
+        )
+    }
+}
+
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Import {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
         tokens.next().expect_left_paren()?;
         tokens.next().expect_keyword_token(Keyword::Import)?;
         let module = tokens.next().expect_string()?;
         let name = tokens.next().expect_string()?;
-        let description = match get_next_keyword(tokens) {
-            Some(Keyword::Func) => todo!(), // ImportDescription::Func(FunctionDefinition::parse(tokens)?),
-            Some(Keyword::Table) => todo!(),
-            Some(Keyword::Memory) => todo!(),
-            Some(Keyword::Global) => todo!(),
-            value => {
-                return Err(Error::new(
-                    tokens.next().cloned(),
-                    format!("Failed to parse Import Description"),
-                ))
-            }
-        };
+        let description = ImportDescription::parse(tokens)?;
         tokens.next().expect_right_paren()?;
         Ok(Import {
             module,
@@ -398,6 +471,8 @@ pub struct IDCtx {
 }
 
 pub struct Module {
+    id: Option<String>,
+
     id_ctx: IDCtx,
 
     // Types definitions inside of the web assembly
@@ -407,19 +482,19 @@ pub struct Module {
     functions: Vec<FunctionDefinition>,
 
     // Select tables through [TableIndex]. Starts at 0. Implicitly reference 0.
-    tables: Vec<Table>,
+    tables: Vec<TableDefinition>,
 
     // Select memory through [MemoryIndex]. Starts at 0. Implicitly reference 0.
     memories: Vec<MemoryOpts>,
 
     // Referenced through [GlobalIndex]. Start with smallest index not referencing a global import.
-    globals: Vec<Global>,
+    globals: Vec<GlobalDefinition>,
 
     // Referenced through [ElementIndex]
     elements: Vec<Element>,
 
     // Referenced through [DataIndex]
-    datas: Vec<Data>,
+    datas: Vec<DataDefinition>,
 
     // List of imports that are required for the module to work
     imports: Vec<Import>,
@@ -443,8 +518,25 @@ impl std::fmt::Display for Module {
             f.pad(&" ".repeat(2))?;
             writeln!(f, "{}", func)?;
         }
+
+        for import in self.imports.iter() {
+            f.pad(&" ".repeat(2))?;
+            writeln!(f, "{}", import)?;
+        }
+
+        for data in &self.datas {
+            f.pad(&" ".repeat(2))?;
+            writeln!(f, "{}", data)?;
+        }
+
+        for export in &self.export {
+            f.pad(&" ".repeat(2))?;
+            writeln!(f, "{}", export)?;
+        }
+        // ending
         f.pad("")?;
         writeln!(f, ")")?;
+
         Ok(())
     }
 }
@@ -452,6 +544,7 @@ impl std::fmt::Display for Module {
 impl Default for Module {
     fn default() -> Self {
         Self {
+            id: None,
             id_ctx: Default::default(),
             types: Vec::new(),
             functions: Default::default(),
@@ -479,7 +572,7 @@ pub fn get_index<'a, I: Iterator<Item = &'a Token>>(
     match tokens.next_if(|t| t.ty() == &TokenType::Id || t.ty() == &TokenType::Number) {
         Some(token) if token.ty() == &TokenType::Id => Ok(Index::Id(token.source().to_string())),
         Some(token) if token.ty() == &TokenType::Number => Ok(Index::Index(read_u32(token)?)),
-        _ => return Err(Error::new(tokens.next().cloned(), "Expected number or id.")),
+        _ => Err(Error::new(tokens.next().cloned(), "Expected number or id.")),
     }
 }
 
@@ -491,106 +584,28 @@ pub fn get_next_keyword<'a, I: Iterator<Item = &'a Token> + Clone>(
     Some(keyword)
 }
 
-impl Visit for Module {
-    fn visit(tee: &Tee) -> Result<Self, Error> {
-        let mut this = Module::default();
-        tee.expect_keyword(Keyword::Module)?;
-
-        for child in tee.children() {
-            // match child.root() {
-            //     Keyword::Type => this.types.push(TypeDefinition::parse(tokens)?),
-            //     Keyword::Func => this.functions.push(FunctionDefinition::parse(tokens)?),
-            //     Keyword::Table => {
-            //         tokens.next().expect_left_paren()?;
-            //         tokens.next().expect_keyword_token(Keyword::Table)?;
-            //         let id = get_id(tokens);
-            //     }
-            //     Keyword::Memory => this.memories.push(MemoryOpts::parse(tokens)?),
-            //     Keyword::Global => {
-            //         tokens.next().expect_left_paren()?;
-            //         tokens.next().expect_keyword_token(Keyword::Global)?;
-            //         let id = get_id(tokens);
-            //     }
-            //     Keyword::Elem => {
-            //         tokens.next().expect_left_paren()?;
-            //         tokens.next().expect_keyword_token(Keyword::Elem)?;
-            //     }
-            //     Keyword::Data => {
-            //         tokens.next().expect_left_paren()?;
-            //         tokens.next().expect_keyword_token(Keyword::Data)?;
-            //     }
-            //     Keyword::Import => {
-            //         tokens.next().expect_left_paren()?;
-            //         tokens.next().expect_keyword_token(Keyword::Import)?;
-            //     }
-            //     Keyword::Export => {
-            //         tokens.next().expect_left_paren()?;
-            //         tokens.next().expect_keyword_token(Keyword::Export)?;
-            //     }
-            //     Keyword::Start => {
-            //         // TODO(Alec): This maybe a feature we want for our own modules.
-            //         // Having multiple start functions just means we'll call them
-            //         // as we see them.
-            //         if this.start.is_some() {
-            //             panic!("Only one start function can exist in a module")
-            //         }
-            //         this.start = Some(StartOpts::parse(tokens)?)
-            //     }
-            //     keyword => {
-            //         tokens.next().expect_left_paren()?;
-            //         return Err(Error::new(
-            //             tokens.next().cloned(),
-            //             format!(
-            //                 "Expected top level module import. Got {:?} instead.",
-            //                 keyword
-            //             ),
-            //         ));
-            //     }
-            // }
-        }
-
-        Ok(this)
-    }
-}
-
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Module {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, Error> {
         let mut this = Module::default();
         tokens.next().expect_left_paren()?;
         tokens.next().expect_keyword_token(Keyword::Module)?;
+        this.id = get_id(tokens);
 
         loop {
             tokens.peek().copied().expect_left_paren()?;
             match tokens.clone().nth(1).expect_keyword()? {
                 Keyword::Type => this.types.push(TypeDefinition::parse(tokens)?),
                 Keyword::Func => this.functions.push(FunctionDefinition::parse(tokens)?),
-                Keyword::Table => {
-                    tokens.next().expect_left_paren()?;
-                    tokens.next().expect_keyword_token(Keyword::Table)?;
-                    let id = get_id(tokens);
-                }
+                Keyword::Table => this.tables.push(TableDefinition::parse(tokens)?),
                 Keyword::Memory => this.memories.push(MemoryOpts::parse(tokens)?),
-                Keyword::Global => {
-                    tokens.next().expect_left_paren()?;
-                    tokens.next().expect_keyword_token(Keyword::Global)?;
-                    let id = get_id(tokens);
-                }
+                Keyword::Global => this.globals.push(GlobalDefinition::parse(tokens)?),
                 Keyword::Elem => {
                     tokens.next().expect_left_paren()?;
                     tokens.next().expect_keyword_token(Keyword::Elem)?;
                 }
-                Keyword::Data => {
-                    tokens.next().expect_left_paren()?;
-                    tokens.next().expect_keyword_token(Keyword::Data)?;
-                }
-                Keyword::Import => {
-                    tokens.next().expect_left_paren()?;
-                    tokens.next().expect_keyword_token(Keyword::Import)?;
-                }
-                Keyword::Export => {
-                    tokens.next().expect_left_paren()?;
-                    tokens.next().expect_keyword_token(Keyword::Export)?;
-                }
+                Keyword::Data => this.datas.push(DataDefinition::parse(tokens)?),
+                Keyword::Import => this.imports.push(Import::parse(tokens)?),
+                Keyword::Export => this.export.push(Export::parse(tokens)?),
                 Keyword::Start => {
                     // TODO(Alec): This maybe a feature we want for our own modules.
                     // Having multiple start functions just means we'll call them
@@ -653,12 +668,23 @@ impl ValidateInstruction for Module {
             ctx.push_type(ty);
         }
 
+        // C.funcs import function types concataed with function types
+        // for import in self.imports {
+        //     match import.description {
+        //         ImportDescription::Func(func) => todo!(),
+        //         ImportDescription::Table(_) => todo!(),
+        //         ImportDescription::Memory(_) => todo!(),
+        //         ImportDescription::Global(_) => todo!(),
+        //     }
+        // }
+
         for func in &self.functions {
             ctx.push_function(func)?;
         }
 
         // internal function types, in index order
         let ctx_ref = &ctx;
+
         // let ft = order_lists(
         //     &self.functions,
         //     |f| f.ty_index,

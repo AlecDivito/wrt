@@ -1,9 +1,9 @@
-use std::{default, fmt::Display, iter::Peekable};
+use std::iter::Peekable;
 
 use crate::{
     execution::{ModuleInstance, Store, PAGE_SIZE},
     parse::{
-        ast::{read_u32, Error, Expect, Parse, Tee, TryGet, Visit},
+        ast::{read_u32, Error, Expect, Parse, TryGet},
         tokenize, Keyword, Token,
     },
     validation::{
@@ -12,7 +12,7 @@ use crate::{
     },
 };
 
-use super::module::{get_id, get_index, get_next_keyword, Module};
+use super::module::{get_id, get_index, get_next_keyword, DataMode, Module};
 
 /// Type of sign an integer is meant to taken as
 ///
@@ -54,7 +54,7 @@ impl std::fmt::Display for BlockType {
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BlockType {
     fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
         match get_next_keyword(tokens) {
-            Some(Keyword::Type) => Ok(BlockType::Index(TypeUse::parse(tokens)?.0)),
+            Some(Keyword::Type) => Ok(BlockType::Index(TypeUse::parse(tokens)?.try_into_index()?)),
             Some(Keyword::Result) => {
                 let mut results = vec![];
                 while Some(Keyword::Result) == get_next_keyword(tokens) {
@@ -132,7 +132,7 @@ impl Variable {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum Index {
     Id(String),
     Index(u32),
@@ -148,7 +148,17 @@ impl std::fmt::Display for Index {
 
 impl Default for Index {
     fn default() -> Self {
-        todo!()
+        Index::Index(0)
+    }
+}
+
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Index {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        let index = match get_id(tokens) {
+            Some(id) => Index::Id(id),
+            None => Index::Index(read_u32(tokens.next().expect_number()?)?),
+        };
+        Ok(index)
     }
 }
 
@@ -194,12 +204,22 @@ impl Default for GlobalType {
         Self::Const(ValueType::RefType(RefType::default()))
     }
 }
+impl std::fmt::Display for GlobalType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GlobalType::Const(value) => write!(f, "{}", value),
+            GlobalType::Var(var) => write!(f, "(mut {})", var),
+        }
+    }
+}
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for GlobalType {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
-        Ok(if let Some(_) = tokens.peek().copied().try_left_paran() {
+        Ok(if tokens.peek().copied().try_left_paran().is_some() {
             tokens.next().expect_left_paren()?;
             tokens.next().expect_keyword_token(Keyword::Mut)?;
-            Self::Var(ValueType::parse(tokens)?)
+            let var = Self::Var(ValueType::parse(tokens)?);
+            tokens.next().expect_right_paren()?;
+            var
         } else {
             Self::Const(ValueType::parse(tokens)?)
         })
@@ -242,7 +262,7 @@ impl Validation<GlobalType> for GlobalType {
 /// TODO(Alec): Validate...
 ///
 /// Like ["Memory"] tables have a size limit.
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct TableType {
     limit: Limit,
     ref_type: RefType,
@@ -251,6 +271,20 @@ pub struct TableType {
 impl TableType {
     pub fn ref_type(&self) -> &RefType {
         &self.ref_type
+    }
+}
+
+impl std::fmt::Display for TableType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}", self.limit, self.ref_type)
+    }
+}
+
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for TableType {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, Error> {
+        let limit = Limit::parse(tokens)?;
+        let ref_type = RefType::parse(tokens)?;
+        Ok(Self { limit, ref_type })
     }
 }
 
@@ -337,7 +371,7 @@ impl MemoryArgument {
 /// Classify linear ['Memories'] and their size range.
 ///
 /// Contains the min and max of memory size, given in units of Page Size.
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct MemoryType {
     limit: Limit,
 }
@@ -345,6 +379,12 @@ pub struct MemoryType {
 impl MemoryType {
     pub fn new(limit: Limit) -> Self {
         Self { limit }
+    }
+}
+
+impl std::fmt::Display for MemoryType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.limit)
     }
 }
 
@@ -361,9 +401,17 @@ impl Validation<MemoryType> for MemoryType {
     }
 }
 
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for MemoryType {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        Ok(Self {
+            limit: Limit::parse(tokens)?,
+        })
+    }
+}
+
 /// ["Limit"] size range of resizable storage. Associated with ["Memory"] and
 /// ["Table"] types. Max is optional.
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Limit {
     min: u32,
     max: Option<u32>,
@@ -372,6 +420,16 @@ pub struct Limit {
 impl Limit {
     pub fn new(min: u32, max: Option<u32>) -> Self {
         Self { min, max }
+    }
+}
+
+impl std::fmt::Display for Limit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.min)?;
+        if let Some(max) = &self.max {
+            write!(f, " {}", max)?;
+        }
+        Ok(())
     }
 }
 
@@ -495,7 +553,10 @@ pub struct ResultType {
 }
 impl std::fmt::Display for ResultType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        for var in self.values.iter() {
+            write!(f, "{}", var)?;
+        }
+        Ok(())
     }
 }
 impl ResultType {
@@ -527,6 +588,7 @@ impl ResultType {
     }
 }
 
+#[derive(Clone)]
 pub struct FuncParam {
     var: Vec<Variable>,
 }
@@ -540,6 +602,14 @@ impl Default for FuncParam {
 impl FuncParam {
     pub fn ty(&self) -> ResultType {
         ResultType::new(self.var.clone())
+    }
+}
+impl std::fmt::Display for FuncParam {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for var in self.var.iter() {
+            write!(f, "(param {})", var)?;
+        }
+        Ok(())
     }
 }
 impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for FuncParam {
@@ -583,11 +653,19 @@ impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for LocalParam {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct FuncResult(pub Vec<Variable>);
 impl FuncResult {
     pub fn ty(&self) -> ResultType {
         ResultType::new(self.0.clone())
+    }
+}
+impl std::fmt::Display for FuncResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for var in self.0.iter() {
+            write!(f, "(result {})", var)?;
+        }
+        Ok(())
     }
 }
 impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for FuncResult {
@@ -764,6 +842,22 @@ pub enum RefType {
     // This is a type of pointer.
     ExternRef(ExternRef),
 }
+
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for RefType {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, Error> {
+        Ok(match tokens.next().expect_keyword()? {
+            Keyword::FuncRef => Self::FuncRef(0),
+            Keyword::ExternRef => Self::ExternRef(0),
+            keyword => {
+                return Err(Error::new(
+                    tokens.next().cloned(),
+                    format!("Expected RefType token. Got {:?} instead.", keyword),
+                ))
+            }
+        })
+    }
+}
+
 impl std::fmt::Display for RefType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         todo!()
@@ -1082,7 +1176,7 @@ pub struct RelativeExport {
 
 impl std::fmt::Display for RelativeExport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "(export {})", self.name)
+        write!(f, "(export \"{}\")", self.name)
     }
 }
 
@@ -1104,7 +1198,7 @@ pub struct RelativeImport {
 
 impl std::fmt::Display for RelativeImport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "(import {} {})", self.module, self.name)
+        write!(f, "(import \"{}\" \"{}\")", self.module, self.name)
     }
 }
 
@@ -1119,25 +1213,66 @@ impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for RelativeImport {
     }
 }
 
-#[derive(Default, Clone)]
-pub struct TypeUse(Index);
+#[derive(Debug, Clone, Default)]
+pub struct TypeUse {
+    index: Option<Index>,
+    params: ResultType,
+    results: ResultType,
+}
+
 impl TypeUse {
-    pub fn index(&self) -> &Index {
-        &self.0
+    pub fn try_into_index(&self) -> Result<Index, Error> {
+        if let Some(v) = self.index.as_ref() {
+            Ok(v.clone())
+        } else {
+            Err(Error::new(
+                None,
+                format!(
+                    "Attempted to get index but found function definition instead: {}",
+                    self
+                ),
+            ))
+        }
     }
 }
 impl std::fmt::Display for TypeUse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "(type {})", self.0)
+        if let Some(index) = self.index.as_ref() {
+            write!(f, "(type {}) ", index)?;
+        }
+        for param in self.params.as_ref() {
+            write!(f, "(param {}) ", param)?;
+        }
+        for result in self.results.as_ref() {
+            write!(f, "(result {}) ", result)?;
+        }
+        Ok(())
     }
 }
+
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for TypeUse {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
-        tokens.next().expect_left_paren()?;
-        tokens.next().expect_keyword_token(Keyword::Type)?;
-        let index = get_index(tokens)?;
-        tokens.next().expect_right_paren()?;
-        Ok(TypeUse(index))
+        let mut this = Self::default();
+        match get_next_keyword(tokens) {
+            Some(Keyword::Type) => {
+                tokens.next().expect_left_paren()?;
+                tokens.next().expect_keyword_token(Keyword::Type)?;
+                let index = Index::parse(tokens)?;
+                tokens.next().expect_right_paren()?;
+                this.index = Some(index)
+            }
+            Some(Keyword::Param) | Some(Keyword::Result) => {}
+            _ => return Ok(TypeUse::default()),
+        }
+
+        while Some(Keyword::Param) == get_next_keyword(tokens) {
+            this.params.extend(FuncParam::parse(tokens)?.var);
+        }
+        while Some(Keyword::Result) == get_next_keyword(tokens) {
+            this.results.extend(FuncResult::parse(tokens)?.0);
+        }
+
+        Ok(this)
     }
 }
 
@@ -1164,6 +1299,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for StartOpts {
     }
 }
 
+#[derive(Clone)]
 pub struct UseMemory(Index);
 
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for UseMemory {
@@ -1226,6 +1362,7 @@ impl Instruction {
     }
 }
 
+#[derive(Clone)]
 pub struct OffsetExpr(Instruction);
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for OffsetExpr {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
@@ -1248,14 +1385,16 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for OffsetExpr {
     }
 }
 
+#[derive(Clone)]
 pub enum DataOpsMode {
     Passive,
     Active,
 }
 
+#[derive(Clone)]
 pub struct DataOps {
     id: Option<String>,
-    data: String,
+    pub data: String,
     mode: DataOpsMode,
     memory: UseMemory,
     offset: Option<OffsetExpr>,
@@ -1293,28 +1432,39 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for DataOps {
     }
 }
 
+#[derive(Default, Clone)]
 pub struct MemoryOpts {
     id: Option<String>,
     limit: Limit,
-    import: Vec<RelativeImport>,
-    export: Vec<RelativeExport>,
-    data: Vec<DataOps>,
+    import: Option<RelativeImport>,
+    export: Option<RelativeExport>,
+    data: Option<DataOps>,
 }
 
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for MemoryOpts {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        let mut this = Self::default();
         tokens.next().expect_left_paren()?;
         tokens.next().expect_keyword_token(Keyword::Memory)?;
-        let id = get_id(tokens);
+        this.id = get_id(tokens);
         // import / export
-        let mut import = vec![];
-        let mut export = vec![];
-        let mut data = vec![];
+        match get_next_keyword(tokens) {
+            Some(Keyword::Import) => this.import = Some(RelativeImport::parse(tokens)?),
+            Some(Keyword::Export) => this.export = Some(RelativeExport::parse(tokens)?),
+            _ => {}
+        }
+        // data
+        // match get_next_keyword(tokens) {
+        //     Some(Keyword::Data) => DataDefinition::parse(tokens)?
+        //     _ => this.limit = Limit::parse(tokens)?,
+        // }
+
+        let mut data: Option<DataOps> = None;
         if tokens.peek().copied().try_left_paran().is_some() {
-            match tokens.clone().nth(1).expect_keyword()? {
-                Keyword::Import => import.push(RelativeImport::parse(tokens)?),
-                Keyword::Export => export.push(RelativeExport::parse(tokens)?),
-                Keyword::Data => data.push(DataOps::parse(tokens)?),
+            let opt = match tokens.clone().nth(1).expect_keyword()? {
+                // Keyword::Import => import.push(RelativeImport::parse(tokens)?),
+                // Keyword::Export => export.push(RelativeExport::parse(tokens)?),
+                Keyword::Data => DataOps::parse(tokens)?,
                 key => {
                     return Err(Error::new(
                         tokens.next().cloned(),
@@ -1324,10 +1474,14 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for MemoryOpts {
                     ),
                     ))
                 }
+            };
+            match data.as_mut() {
+                Some(inner) => inner.data.push_str(&opt.data),
+                None => data = Some(opt),
             }
         }
-        let limit = if tokens.peek().copied().try_right_paran().is_some() {
-            if let Some(data) = data.first() {
+        this.limit = if tokens.peek().copied().try_right_paran().is_some() {
+            if let Some(data) = &data {
                 data.limit()
             } else {
                 return Err(Error::new(
@@ -1339,13 +1493,8 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for MemoryOpts {
             Limit::parse(tokens)?
         };
         tokens.next().expect_right_paren()?;
-        Ok(Self {
-            id,
-            limit,
-            import,
-            export,
-            data,
-        })
+        this.data = data;
+        Ok(this)
     }
 }
 
@@ -1563,11 +1712,9 @@ pub struct FunctionDefinition {
     id: Option<String>,
     // module level information
     import: Option<RelativeImport>,
-    export: Option<RelativeExport>,
+    export: Vec<RelativeExport>,
     // type t
-    ty: Option<TypeUse>,
-    params: ResultType,
-    result: ResultType,
+    ty: TypeUse,
     // locals l
     locals: Vec<Variable>,
     // instructions
@@ -1583,19 +1730,10 @@ impl std::fmt::Display for FunctionDefinition {
         if let Some(import) = self.import.as_ref() {
             write!(f, " {}", import)?;
         }
-        if let Some(export) = self.export.as_ref() {
+        for export in self.export.iter() {
             write!(f, " {}", export)?;
         }
-        if let Some(ty) = self.ty.as_ref() {
-            write!(f, " {}", ty)?;
-        } else {
-            for var in self.params.as_ref() {
-                write!(f, " (param {})", var)?;
-            }
-            for var in self.result.as_ref() {
-                write!(f, " (result {})", var)?;
-            }
-        }
+        write!(f, " {}", self.ty)?;
         for local in self.locals.iter() {
             write!(f, " (local {})", local)?;
         }
@@ -1616,12 +1754,8 @@ impl FunctionDefinition {
         self.id.as_ref()
     }
 
-    pub fn ty_def(&self) -> Option<&TypeUse> {
-        self.ty.as_ref()
-    }
-
-    pub fn ty(&self) -> FunctionType {
-        FunctionType::new(self.params.clone(), self.result.clone())
+    pub fn ty(&self) -> &TypeUse {
+        &self.ty
     }
 }
 
@@ -1636,21 +1770,17 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for FunctionDefinit
             return Ok(this);
         }
 
-        if Some(Keyword::Import) == get_next_keyword(tokens) {
-            this.import = Some(RelativeImport::parse(tokens)?);
+        while let Some(keyword) = get_next_keyword(tokens) {
+            match keyword {
+                Keyword::Import if this.import.is_none() => {
+                    this.import = Some(RelativeImport::parse(tokens)?);
+                }
+                Keyword::Export => this.export.push(RelativeExport::parse(tokens)?),
+                _ => break,
+            }
         }
-        if Some(Keyword::Export) == get_next_keyword(tokens) {
-            this.export = Some(RelativeExport::parse(tokens)?);
-        }
-        if Some(Keyword::Type) == get_next_keyword(tokens) {
-            this.ty = Some(TypeUse::parse(tokens)?);
-        }
-        while Some(Keyword::Param) == get_next_keyword(tokens) {
-            this.params.extend(FuncParam::parse(tokens)?.var);
-        }
-        while Some(Keyword::Result) == get_next_keyword(tokens) {
-            this.result.extend(FuncResult::parse(tokens)?.0);
-        }
+
+        this.ty = TypeUse::parse(tokens)?;
         while Some(Keyword::Local) == get_next_keyword(tokens) {
             this.locals.extend(LocalParam::parse(tokens)?.var);
         }
@@ -1664,29 +1794,217 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for FunctionDefinit
 
 impl ValidateInstruction for FunctionDefinition {
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let ty = if let Some(ty) = &self.ty {
-            ctx.get_type(ty.index())?.clone()
-        } else {
-            FunctionType::new(self.params.clone(), self.result.clone())
-        };
+        todo!("Alec, we need to fix the TypeUse issue, everything should change into an index :(");
+        // let ty = if let Some(ty) = &self.ty {
+        //     ctx.get_type(ty.try_into_index().as_ref().unwrap())?.clone()
+        // } else {
+        //     FunctionType::new(self.params.clone(), self.result.clone())
+        // };
 
-        let mut ctx1 = ctx.clone();
-        for parameters in &self.params.values {
-            ctx1.push_local(parameters);
+        // let mut ctx1 = ctx.clone();
+        // for parameters in &self.params.values {
+        //     ctx1.push_local(parameters);
+        // }
+        // for local in &self.locals {
+        //     ctx1.push_local(local);
+        // }
+        // // TODO(Alec): Labels, we don't store them right now on our function defintion
+        // // https://webassembly.github.io/spec/core/valid/modules.html#functions
+        // ctx1.set_returning(Some(self.result.clone()));
+
+        // let return_ty = self.instructions.validate(&mut ctx1, inputs)?;
+
+        // if return_ty == self.result.values() {
+        //     Ok(return_ty)
+        // } else {
+        //     Err(ValidationError::new())
+        // }
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct GlobalDefinition {
+    // id
+    id: Option<String>,
+    // module level information
+    import: Option<RelativeImport>,
+    export: Option<RelativeExport>,
+    // Global information
+    ty: GlobalType,
+    // instructions
+    // init: Instruction,
+    init: Const,
+}
+
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for GlobalDefinition {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        let mut this = Self::default();
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::Global)?;
+        this.id = get_id(tokens);
+
+        match get_next_keyword(tokens) {
+            Some(Keyword::Import) => this.import = Some(RelativeImport::parse(tokens)?),
+            Some(Keyword::Export) => this.export = Some(RelativeExport::parse(tokens)?),
+            _ => {}
         }
-        for local in &self.locals {
-            ctx1.push_local(local);
-        }
-        // TODO(Alec): Labels, we don't store them right now on our function defintion
-        // https://webassembly.github.io/spec/core/valid/modules.html#functions
-        ctx1.set_returning(Some(self.result.clone()));
 
-        let return_ty = self.instructions.validate(&mut ctx1, inputs)?;
+        this.ty = GlobalType::parse(tokens)?;
 
-        if return_ty == self.result.values() {
-            Ok(return_ty)
+        // Parse instruction
+        tokens.next().expect_left_paren()?;
+        this.init = Const::parse(tokens)?;
+        tokens.next().expect_right_paren()?;
+
+        // Complete block
+        tokens.next().expect_right_paren()?;
+        Ok(this)
+    }
+}
+
+impl ValidateInstruction for GlobalDefinition {
+    fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
+        self.ty.validate(ctx, ())?;
+        // TODO(Alec): The expression must be a constant expressions only
+        // Add validation for the condition above
+        // TODO(Alec): This is only supposed to be constant? Do we need a special function for this?
+        let mut output = self.init.validate(ctx, inputs)?;
+        if output.len() == 1 {
+            let ty = output.pop().unwrap();
+            self.ty.validate(ctx, ty)?;
+            Ok(vec![])
         } else {
             Err(ValidationError::new())
         }
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct TableDefinition {
+    // id
+    id: Option<String>,
+    // module level information
+    import: Option<RelativeImport>,
+    export: Option<RelativeExport>,
+    // Global information
+    ty: TableType,
+}
+
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for TableDefinition {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        let mut this = Self::default();
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::Table)?;
+
+        this.id = get_id(tokens);
+
+        match get_next_keyword(tokens) {
+            Some(Keyword::Import) => this.import = Some(RelativeImport::parse(tokens)?),
+            Some(Keyword::Export) => this.export = Some(RelativeExport::parse(tokens)?),
+            _ => {}
+        }
+
+        this.ty = TableType::parse(tokens)?;
+
+        // Complete block
+        tokens.next().expect_right_paren()?;
+        Ok(this)
+    }
+}
+
+impl ValidateInstruction for TableDefinition {
+    fn validate(&self, ctx: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
+        self.ty.validate(ctx, ())?;
+        Ok(vec![])
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct DataDefinition {
+    id: Option<String>,
+    mode: DataMode,
+    data: Vec<u8>,
+}
+
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for DataDefinition {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        let mut this = Self::default();
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::Data)?;
+        this.id = get_id(tokens);
+
+        let memory = if let Some(Keyword::Memory) = get_next_keyword(tokens) {
+            tokens.next().expect_left_paren()?;
+            tokens.next().expect_keyword_token(Keyword::Memory)?;
+            let index = if tokens.peek().cloned().expect_number().is_ok() {
+                Index::Index(read_u32(tokens.next().expect_number()?)?)
+            } else {
+                let id = get_id(tokens)
+                    .ok_or_else(|| Error::new(tokens.next().cloned(), "Expected Id".to_string()))?;
+                Index::Id(id)
+            };
+            tokens.next().expect_right_paren()?;
+            Some(index)
+        } else {
+            None
+        };
+
+        let offset = match get_next_keyword(tokens) {
+            Some(Keyword::Offset) => {
+                tokens.next().expect_left_paren()?;
+                tokens.next().expect_keyword_token(Keyword::Offset)?;
+                tokens.next().expect_left_paren()?;
+                let offset = Const::parse(tokens)?;
+                tokens.next().expect_right_paren()?;
+                tokens.next().expect_right_paren()?;
+                Some(offset)
+            }
+            Some(Keyword::Const(_)) => {
+                tokens.next().expect_left_paren()?;
+                let offset = Const::parse(tokens)?;
+                tokens.next().expect_right_paren()?;
+                Some(offset)
+            }
+            _ => None,
+        };
+
+        if tokens.peek().copied().expect_string().is_ok() {
+            let mut str = Vec::new();
+            while tokens.peek().copied().expect_string().is_ok() {
+                str.extend(tokens.next().expect_string()?.as_bytes());
+            }
+            this.data = str;
+        };
+
+        this.mode = match (memory, offset) {
+            (Some(memory), Some(offset)) => DataMode::Active { memory, offset },
+            (None, Some(offset)) => DataMode::Active {
+                memory: Default::default(),
+                offset,
+            },
+            (Some(_), None) => DataMode::Passive,
+            (None, None) => DataMode::Passive,
+        };
+
+        tokens.next().expect_right_paren()?;
+        Ok(this)
+    }
+}
+
+impl std::fmt::Display for DataDefinition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(data")?;
+        if let Some(id) = self.id.as_ref() {
+            write!(f, " ${}", id)?;
+        }
+        match &self.mode {
+            DataMode::Passive => {}
+            DataMode::Active { memory, offset } => {
+                write!(f, " (memory {}) (offset {})", memory, offset)?;
+            }
+        }
+        // TODO(Alec): data.clone()...really...
+        write!(f, " \"{}\")", String::from_utf8(self.data.clone()).unwrap())?;
+        Ok(())
     }
 }

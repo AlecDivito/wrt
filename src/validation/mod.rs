@@ -52,7 +52,7 @@ use crate::{
     },
     structure::types::{
         FunctionDefinition, FunctionIndex, FunctionType, GlobalType, Index, MemoryType, RefType,
-        ResultType, TableType, TypeDefinition, ValueType, Variable,
+        ResultType, TableType, TypeDefinition, TypeUse, ValueType, Variable,
     },
 };
 
@@ -119,11 +119,14 @@ impl Context {
     }
 
     pub fn push_function(&mut self, def: &FunctionDefinition) -> Result<(), ValidationError> {
-        let ty = match def.ty_def() {
-            Some(ty) => self.get_type(ty.index())?.clone(),
-            None => def.ty(),
-        };
-        self.functions.push(def.id().cloned(), ty);
+        todo!("Holy man");
+        // let ty = match def.ty() {
+        //     TypeUse::Index(index) => self.get_type(index)?.clone(),
+        //     TypeUse::Inline { params, results } => {
+        //         FunctionType::new(params.clone(), results.clone())
+        //     }
+        // };
+        // self.functions.push(def.id().cloned(), ty);
         Ok(())
     }
 
