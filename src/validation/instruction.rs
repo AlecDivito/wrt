@@ -11,10 +11,10 @@ use crate::{
         types::{
             BlockType, DataIndex,
             Direction::{Left, Right},
-            ElementIndex, FloatVectorShape, FuncResult, FunctionIndex, GlobalType, HalfType,
-            HeapType, Index, Instruction, IntType, IntegerVectorShape, LocalIndex, MemoryArgument,
+            ElementIndex, FloatType, FloatVectorShape, FuncResult, FunctionIndex, GlobalType,
+            HalfType, HeapType, Index, Instruction, IntType, IntegerVectorShape, MemoryArgument,
             MemoryIndex, MemoryLoadNumber, MemoryWidth, MemoryZeroWidth, NumType, RefType,
-            SignType, TableIndex, TypeIndex, ValueType, VecType, VectorMemoryOp, VectorShape,
+            SignType, TableIndex, ValueType, VecType, VectorMemoryOp, VectorShape,
         },
     },
 };
@@ -41,6 +41,9 @@ pub enum Operation {
 
     Nop(NopOperation),
     GlobalGet(GlobalGetOperation),
+    LocalSet(LocalSetOperation),
+    LocalTee(LocalTeeOperation),
+    GlobalSet(GlobalSetOperation),
     LocalGet(LocalGetOperation),
     Unreachable(UnreachableOperation),
 
@@ -51,6 +54,7 @@ pub enum Operation {
     // Control
     Block(BlockOperation),
     Call(CallOperation),
+    CallIndirect(CallIndirectOperation),
     Loop(LoopOperation),
     If(IfOperation),
     Break(BrOperation),
@@ -80,11 +84,15 @@ impl ValidateInstruction for Operation {
             Operation::Nop(v) => v.validate(ctx, inputs),
             Operation::GlobalGet(v) => v.validate(ctx, inputs),
             Operation::LocalGet(v) => v.validate(ctx, inputs),
+            Operation::LocalSet(v) => v.validate(ctx, inputs),
+            Operation::LocalTee(v) => v.validate(ctx, inputs),
+            Operation::GlobalSet(v) => v.validate(ctx, inputs),
             Operation::Unreachable(v) => v.validate(ctx, inputs),
             Operation::Drop(v) => v.validate(ctx, inputs),
             Operation::Select(v) => v.validate(ctx, inputs),
             Operation::Block(v) => v.validate(ctx, inputs),
             Operation::Call(v) => v.validate(ctx, inputs),
+            Operation::CallIndirect(v) => v.validate(ctx, inputs),
             Operation::Loop(v) => v.validate(ctx, inputs),
             Operation::If(v) => v.validate(ctx, inputs),
             Operation::Break(v) => v.validate(ctx, inputs),
@@ -98,33 +106,6 @@ impl ValidateInstruction for Operation {
     }
 }
 
-enum Literal {
-    // These also double as constants
-    I32(i32),
-    I64(i64),
-    F32(f32),
-    F64(f64),
-}
-
-// enum Expression {
-//     Literal(Literal),
-//     Variable(String),
-
-//     UnaryOp(UnaryOperator, Box<Expression>),
-//     BinaryOp(BinaryOperator, Box<Expression>, Box<Expression>),
-//     TestOp(TestOperator, Box<Expression>),
-//     ComparisonOp(CompareOperator, Box<Expression>),
-//     ConvertOp(ConvertOperator, Box<Expression>),
-
-//     FunctionCall(String, Vec<Expression>),
-// }
-
-enum BlockInstruction {
-    Block,
-    If,
-    Loop,
-}
-
 impl std::fmt::Display for Operation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -132,11 +113,15 @@ impl std::fmt::Display for Operation {
             Operation::Nop(opt) => write!(f, "{}", opt),
             Operation::GlobalGet(opt) => write!(f, "{}", opt),
             Operation::LocalGet(opt) => write!(f, "{}", opt),
+            Operation::GlobalSet(opt) => write!(f, "{}", opt),
+            Operation::LocalSet(opt) => write!(f, "{}", opt),
+            Operation::LocalTee(opt) => write!(f, "{}", opt),
             Operation::Unreachable(opt) => write!(f, "{}", opt),
             Operation::Drop(opt) => write!(f, "{}", opt),
             Operation::Select(opt) => write!(f, "{}", opt),
             Operation::Block(opt) => write!(f, "{}", opt),
             Operation::Call(opt) => write!(f, "{}", opt),
+            Operation::CallIndirect(opt) => write!(f, "{}", opt),
             Operation::Loop(opt) => write!(f, "{}", opt),
             Operation::If(opt) => write!(f, "{}", opt),
             Operation::Break(opt) => write!(f, "{}", opt),
@@ -162,7 +147,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Operation {
             // Keyword::ExternRef => todo!(),
             Keyword::VecShape(_) => todo!(),
             // Keyword::Extern => todo!(),
-            Keyword::Mut => todo!(),
+            // Keyword::Mut => todo!(),
             Keyword::Nop => Operation::Nop(NopOperation {}),
             Keyword::Unreachable => Operation::Unreachable(UnreachableOperation {}),
             Keyword::Drop => Operation::Drop(DropOperation {}),
@@ -176,12 +161,12 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Operation {
             Keyword::If => Operation::If(IfOperation::parse(tokens)?),
             Keyword::Select => Operation::Select(SelectOperation::parse(tokens)?),
             Keyword::Call => Operation::Call(CallOperation::parse(tokens)?),
-            Keyword::CallIndirect => todo!(),
+            Keyword::CallIndirect => Operation::CallIndirect(CallIndirectOperation::parse(tokens)?),
             Keyword::LocalGet => Operation::LocalGet(LocalGetOperation::parse(tokens)?),
-            Keyword::LocalSet => todo!(),
-            Keyword::LocalTee => todo!(),
+            Keyword::LocalSet => Operation::LocalSet(LocalSetOperation::parse(tokens)?),
+            Keyword::LocalTee => Operation::LocalTee(LocalTeeOperation::parse(tokens)?),
             Keyword::GlobalGet => Operation::GlobalGet(GlobalGetOperation::parse(tokens)?),
-            Keyword::GlobalSet => todo!(),
+            Keyword::GlobalSet => Operation::GlobalSet(GlobalSetOperation::parse(tokens)?),
             Keyword::TableGet => todo!(),
             Keyword::TableSet => todo!(),
             Keyword::TableSize => todo!(),
@@ -222,6 +207,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Operation {
             Keyword::VecLoadZero(_) => todo!(),
             Keyword::VecLoadLane(_) => todo!(),
             Keyword::VecStoreLane(_) => todo!(),
+            // number stuff
             Keyword::Const(expected) => {
                 let value = read_number(expected, tokens.next().expect_number()?)?;
                 Operation::Const(Const::new(expected, value))
@@ -230,17 +216,33 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Operation {
             Keyword::RefNull => Operation::RefNull(RefNull::parse(tokens)?),
             Keyword::RefFunc => Operation::RefFunc(RefFunc::parse(tokens)?),
             Keyword::RefIsNull => Operation::RefIsNull(RefIsNull),
-            Keyword::RefExtern => todo!(),
+            // Keyword::RefExtern => todo!(),
             Keyword::IntClz(ty) => Operation::Unary(UnaryOperation::new(ty, UnaryFunction::Clz)),
             Keyword::IntCtz(ty) => Operation::Unary(UnaryOperation::new(ty, UnaryFunction::Ctz)),
             Keyword::IntPopCnt(ty) => {
                 Operation::Unary(UnaryOperation::new(ty, UnaryFunction::PopCnt))
             }
-            Keyword::IntExtend8Signed(_) => {
-                Operation::Convert(ConvertOperation::new(input, output, sign))
-            }
-            Keyword::IntExtend16Signed(_) => todo!(),
-            Keyword::I64Extend32Signed => todo!(),
+            Keyword::IntExtend8Signed(ty) => Operation::Convert(ConvertOperation::new(
+                ty,
+                ConvertFunction::Extend {
+                    by: MemoryWidth::I8,
+                    sign: SignType::Signed,
+                },
+            )),
+            Keyword::IntExtend16Signed(ty) => Operation::Convert(ConvertOperation::new(
+                ty,
+                ConvertFunction::Extend {
+                    by: MemoryWidth::I16,
+                    sign: SignType::Signed,
+                },
+            )),
+            Keyword::I64Extend32Signed => Operation::Convert(ConvertOperation::new(
+                NumType::I64,
+                ConvertFunction::Extend {
+                    by: MemoryWidth::I32,
+                    sign: SignType::Signed,
+                },
+            )),
 
             Keyword::NegativeFloat(expected) => {
                 Operation::Unary(UnaryOperation::new(expected, UnaryFunction::Neg))
@@ -350,26 +352,122 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Operation {
             Keyword::CompareFloatGreaterOrEqual(shape) => {
                 Operation::Compare(CompareOperation::new(shape, CompareFunction::GreaterEqual))
             }
-            Keyword::I32WrapI64 => todo!(),
-            Keyword::I64ExtendI32(_) => todo!(),
-            Keyword::F32DemoteF64 => todo!(),
-            Keyword::F64PromoteF32 => todo!(),
-            Keyword::I32TruncateF32(_) => todo!(),
-            Keyword::I64TruncateF32(_) => todo!(),
-            Keyword::I32TruncateF64(_) => todo!(),
-            Keyword::I64TruncateF64(_) => todo!(),
-            Keyword::I32TruncateSatF32(_) => todo!(),
-            Keyword::I64TruncateSatF32(_) => todo!(),
-            Keyword::I32TruncateSatF64(_) => todo!(),
-            Keyword::I64TruncateSatF64(_) => todo!(),
-            Keyword::F32ConvertI32(_) => todo!(),
-            Keyword::F32ConvertI64(_) => todo!(),
-            Keyword::F64ConvertI32(_) => todo!(),
-            Keyword::F64ConvertI64(_) => todo!(),
-            Keyword::F32ReinterpretI32 => todo!(),
-            Keyword::F64ReinterpretI64 => todo!(),
-            Keyword::I32ReinterpretI32 => todo!(),
-            Keyword::I64ReinterpretI64 => todo!(),
+            Keyword::I32WrapI64 => Operation::Convert(ConvertOperation::new(
+                NumType::I32,
+                ConvertFunction::Wrap(NumType::I64),
+            )),
+            Keyword::I64ExtendI32(sign) => Operation::Convert(ConvertOperation::new(
+                NumType::I64,
+                ConvertFunction::ExtendI32 { sign },
+            )),
+            Keyword::F32DemoteF64 => Operation::Convert(ConvertOperation::new(
+                FloatType::F32,
+                ConvertFunction::Demote(FloatType::F64),
+            )),
+            Keyword::F64PromoteF32 => Operation::Convert(ConvertOperation::new(
+                FloatType::F64,
+                ConvertFunction::Promote(FloatType::F32),
+            )),
+            Keyword::I32TruncateF32(sign) => Operation::Convert(ConvertOperation::new(
+                NumType::I32,
+                ConvertFunction::Truncate {
+                    by: FloatType::F32,
+                    sign,
+                },
+            )),
+            Keyword::I64TruncateF32(sign) => Operation::Convert(ConvertOperation::new(
+                NumType::I64,
+                ConvertFunction::Truncate {
+                    by: FloatType::F32,
+                    sign,
+                },
+            )),
+            Keyword::I32TruncateF64(sign) => Operation::Convert(ConvertOperation::new(
+                NumType::I32,
+                ConvertFunction::Truncate {
+                    by: FloatType::F64,
+                    sign,
+                },
+            )),
+            Keyword::I64TruncateF64(sign) => Operation::Convert(ConvertOperation::new(
+                NumType::I64,
+                ConvertFunction::Truncate {
+                    by: FloatType::F64,
+                    sign,
+                },
+            )),
+            Keyword::I32TruncateSatF32(sign) => Operation::Convert(ConvertOperation::new(
+                NumType::I32,
+                ConvertFunction::TruncateSat {
+                    by: FloatType::F32,
+                    sign,
+                },
+            )),
+            Keyword::I64TruncateSatF32(sign) => Operation::Convert(ConvertOperation::new(
+                NumType::I64,
+                ConvertFunction::TruncateSat {
+                    by: FloatType::F32,
+                    sign,
+                },
+            )),
+            Keyword::I32TruncateSatF64(sign) => Operation::Convert(ConvertOperation::new(
+                NumType::I32,
+                ConvertFunction::TruncateSat {
+                    by: FloatType::F64,
+                    sign,
+                },
+            )),
+            Keyword::I64TruncateSatF64(sign) => Operation::Convert(ConvertOperation::new(
+                NumType::I64,
+                ConvertFunction::TruncateSat {
+                    by: FloatType::F64,
+                    sign,
+                },
+            )),
+            Keyword::F32ConvertI32(sign) => Operation::Convert(ConvertOperation::new(
+                NumType::F32,
+                ConvertFunction::Convert {
+                    by: IntType::I32,
+                    sign,
+                },
+            )),
+            Keyword::F32ConvertI64(sign) => Operation::Convert(ConvertOperation::new(
+                NumType::F32,
+                ConvertFunction::Convert {
+                    by: IntType::I64,
+                    sign,
+                },
+            )),
+            Keyword::F64ConvertI32(sign) => Operation::Convert(ConvertOperation::new(
+                NumType::F64,
+                ConvertFunction::Convert {
+                    by: IntType::I32,
+                    sign,
+                },
+            )),
+            Keyword::F64ConvertI64(sign) => Operation::Convert(ConvertOperation::new(
+                NumType::F64,
+                ConvertFunction::Convert {
+                    by: IntType::I64,
+                    sign,
+                },
+            )),
+            Keyword::F32ReinterpretI32 => Operation::Convert(ConvertOperation::new(
+                NumType::F32,
+                ConvertFunction::Reinterpret(NumType::I32),
+            )),
+            Keyword::F64ReinterpretI64 => Operation::Convert(ConvertOperation::new(
+                NumType::F64,
+                ConvertFunction::Reinterpret(NumType::I64),
+            )),
+            Keyword::I32ReinterpretF32 => Operation::Convert(ConvertOperation::new(
+                NumType::I32,
+                ConvertFunction::Reinterpret(NumType::F32),
+            )),
+            Keyword::I64ReinterpretF64 => Operation::Convert(ConvertOperation::new(
+                NumType::I64,
+                ConvertFunction::Reinterpret(NumType::F64),
+            )),
             Keyword::V128Not => todo!(),
             Keyword::V128And => todo!(),
             Keyword::V128AndNot => todo!(),
@@ -447,13 +545,13 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Operation {
             Keyword::VecSplat(_) => todo!(),
             Keyword::VecExtract { shape, sign } => todo!(),
             Keyword::VecReplate(_) => todo!(),
-            Keyword::Module => todo!(),
-            Keyword::Bin => todo!(),
-            Keyword::Quote => todo!(),
-            Keyword::Script => todo!(),
-            Keyword::Register => todo!(),
-            Keyword::Invoke => todo!(),
-            Keyword::Get => todo!(),
+            // Keyword::Module => todo!(),
+            // Keyword::Bin => todo!(),
+            // Keyword::Quote => todo!(),
+            // Keyword::Script => todo!(),
+            // Keyword::Register => todo!(),
+            // Keyword::Invoke => todo!(),
+            // Keyword::Get => todo!(),
             Keyword::AssertMalformed => todo!(),
             Keyword::AssertInvalid => todo!(),
             Keyword::AssertUnlinkable => todo!(),
@@ -462,10 +560,10 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Operation {
             Keyword::AssertExhaustion => todo!(),
             Keyword::NaNCanonical => todo!(),
             Keyword::NaNArithmetic(_) => todo!(),
-            Keyword::Infinit => todo!(),
-            Keyword::NaN => todo!(),
-            Keyword::Input => todo!(),
-            Keyword::Output => todo!(),
+            // Keyword::Infinit => todo!(),
+            // Keyword::NaN => todo!(),
+            // Keyword::Input => todo!(),
+            // Keyword::Output => todo!(),
             keyword => {
                 return Err(Error::new(
                     tokens.next().cloned(),
@@ -783,34 +881,66 @@ impl ValidateInstruction for CompareOperation {
     }
 }
 
+#[derive(Clone, Debug)]
 pub enum ConvertFunction {
     Extend { by: MemoryWidth, sign: SignType },
+    ExtendI32 { sign: SignType },
+    Truncate { by: FloatType, sign: SignType },
+    TruncateSat { by: FloatType, sign: SignType },
+    Convert { by: IntType, sign: SignType },
+    Reinterpret(NumType),
+    Demote(FloatType),
+    Promote(FloatType),
+    Wrap(NumType),
 }
-impl std::fmt::
+impl std::fmt::Display for ConvertFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConvertFunction::Extend { by, sign } => write!(f, "extend{}_{}", by, sign),
+            ConvertFunction::ExtendI32 { sign } => write!(f, "extend_i32_{}", sign),
+            ConvertFunction::Truncate { by, sign } => write!(f, "trunc_{}_{}", by, sign),
+            ConvertFunction::TruncateSat { by, sign } => write!(f, "trunc_sat_{}_{}", by, sign),
+            ConvertFunction::Convert { by, sign } => write!(f, "convert_{}_{}", by, sign),
+            ConvertFunction::Reinterpret(ty) => write!(f, "reinterpret_{}", ty),
+            ConvertFunction::Demote(ty) => write!(f, "demote_{}", ty),
+            ConvertFunction::Promote(ty) => write!(f, "promote_{}", ty),
+            ConvertFunction::Wrap(ty) => write!(f, "wrap_{}", ty),
+        }
+    }
+}
 // Validate cvt operation. Only avaliable on numbers.
+#[derive(Clone, Debug)]
 pub struct ConvertOperation {
     // This is the number types that is calling this function. Ex. i32 => i32.warp_i64_s
     // i32 is the input
     // i64 is the output
     // s is for signed
-    input: NumType,
+    ty: NumType,
     func: ConvertFunction,
 }
-
-impl ConvertOperation {
-    pub fn new(input: impl Into<NumType>, func: ConvertFunction) -> Self {
-        Self { input, func }
+impl std::fmt::Display for ConvertOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}", self.ty, self.func)
     }
 }
-impl ValidateInstruction for CvtOperation {
-    // type Output = [ValueType; 1];
-    fn validate(&self, _: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let op1 = inputs.pop()?;
-        if ValueType::Num(self.input) == op1 {
-            Ok(vec![ValueType::Num(self.output)])
-        } else {
-            Err(ValidationError::new())
+impl ConvertOperation {
+    pub fn new(ty: impl Into<NumType>, func: ConvertFunction) -> Self {
+        Self {
+            ty: ty.into(),
+            func,
         }
+    }
+}
+impl ValidateInstruction for ConvertOperation {
+    // type Output = [ValueType; 1];
+    fn validate(&self, _: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
+        todo!("validation for convert instructions")
+        // let op1 = inputs.pop()?;
+        // if ValueType::Num(self.input) == op1 {
+        //     Ok(vec![ValueType::Num(self.output)])
+        // } else {
+        //     Err(ValidationError::new())
+        // }
     }
 }
 
@@ -1314,26 +1444,52 @@ impl ValidateInstruction for LocalGetOperation {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct LocalSetOperation {
-    index: LocalIndex,
+    index: Index,
+}
+impl std::fmt::Display for LocalSetOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(local.set {})", self.index)
+    }
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for LocalSetOperation {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        Ok(Self {
+            index: Index::parse(tokens)?,
+        })
+    }
 }
 impl ValidateInstruction for LocalSetOperation {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         let ty = inputs.pop()?;
-        ctx.set_local(self.index, ty)?;
+        ctx.set_local(self.index.clone(), ty)?;
         Ok(vec![])
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct LocalTeeOperation {
-    index: LocalIndex,
+    index: Index,
+}
+impl std::fmt::Display for LocalTeeOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(local.tee {})", self.index)
+    }
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for LocalTeeOperation {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        Ok(Self {
+            index: Index::parse(tokens)?,
+        })
+    }
 }
 impl ValidateInstruction for LocalTeeOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         let ty = inputs.pop()?;
-        ctx.set_local(self.index, ty.clone())?;
+        ctx.set_local(self.index.clone(), ty.clone())?;
         Ok(vec![ty])
     }
 }
@@ -1366,14 +1522,27 @@ impl ValidateInstruction for GlobalGetOperation {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct GlobalSetOperation {
-    index: LocalIndex,
+    index: Index,
+}
+impl std::fmt::Display for GlobalSetOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(global.set {})", self.index)
+    }
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for GlobalSetOperation {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        Ok(Self {
+            index: Index::parse(tokens)?,
+        })
+    }
 }
 impl ValidateInstruction for GlobalSetOperation {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         let ty = inputs.pop()?;
-        ctx.set_global(self.index, ty)?;
+        ctx.set_global(self.index.clone(), ty)?;
         Ok(vec![])
     }
 }
@@ -2289,12 +2458,9 @@ impl std::fmt::Display for CallOperation {
 }
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for CallOperation {
     fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
-        let index = if let Some(id) = get_id(tokens) {
-            Index::Id(id)
-        } else {
-            Index::Index(read_u32(tokens.next().expect_number()?)?)
-        };
-        Ok(Self { index })
+        Ok(Self {
+            index: Index::parse(tokens)?,
+        })
     }
 }
 impl ValidateInstruction for CallOperation {
@@ -2310,9 +2476,23 @@ impl ValidateInstruction for CallOperation {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct CallIndirectOperation {
-    table: TableIndex,
-    ty: TypeIndex,
+    table: Index,
+    ty: Index,
+}
+
+impl std::fmt::Display for CallIndirectOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(call_indirect {} {})", self.table, self.ty)
+    }
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for CallIndirectOperation {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        let table = Index::parse(tokens)?;
+        let ty = Index::parse(tokens)?;
+        Ok(Self { table, ty })
+    }
 }
 impl ValidateInstruction for CallIndirectOperation {
     // type Output = Vec<ValueType>;

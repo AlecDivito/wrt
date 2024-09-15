@@ -270,8 +270,8 @@ pub enum Keyword {
     F64ConvertI64(SignType),
     F32ReinterpretI32,
     F64ReinterpretI64,
-    I32ReinterpretI32,
-    I64ReinterpretI64,
+    I32ReinterpretF32,
+    I64ReinterpretF64,
 
     // Vec Unary
     V128Not,
@@ -684,8 +684,8 @@ impl FromStr for Keyword {
             "f64.convert_i64_s" => F64ConvertI64(Signed),
             "f32.reinterpret_i32" => F32ReinterpretI32,
             "f64.reinterpret_i64" => F64ReinterpretI64,
-            "i32.reinterpret_f32" => I32ReinterpretI32,
-            "i64.reinterpret_f64" => I64ReinterpretI64,
+            "i32.reinterpret_f32" => I32ReinterpretF32,
+            "i64.reinterpret_f64" => I64ReinterpretF64,
       
             // Vec Unary
             "v128.not" => V128Not,

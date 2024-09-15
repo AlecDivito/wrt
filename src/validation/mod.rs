@@ -183,7 +183,7 @@ impl Context {
     //     self.locals.get(index).ok_or_else(ValidationError::new)
     // }
 
-    pub fn set_local(&mut self, _: u32, _: ValueType) -> Result<(), ValidationError> {
+    pub fn set_local(&mut self, _: Index, _: ValueType) -> Result<(), ValidationError> {
         todo!("set_local");
         // let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
         // if self.locals.get(index).is_some() {
@@ -198,7 +198,7 @@ impl Context {
         self.globals.find(index)
     }
 
-    pub fn set_global(&mut self, _: u32, _: ValueType) -> Result<(), ValidationError> {
+    pub fn set_global(&mut self, _: Index, _: ValueType) -> Result<(), ValidationError> {
         todo!("set_global")
         // let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
         // match self.globals.get(index) {

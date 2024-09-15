@@ -340,6 +340,17 @@ pub enum MemoryWidth {
     I64,
 }
 
+impl std::fmt::Display for MemoryWidth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MemoryWidth::I8 => write!(f, "8"),
+            MemoryWidth::I16 => write!(f, "16"),
+            MemoryWidth::I32 => write!(f, "32"),
+            MemoryWidth::I64 => write!(f, "64"),
+        }
+    }
+}
+
 impl MemoryWidth {
     pub fn bit_width(&self) -> u32 {
         match self {
@@ -1063,6 +1074,11 @@ pub enum FloatType {
     F32,
     F64,
 }
+impl std::fmt::Display for FloatType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", std::convert::Into::<NumType>::into(*self))
+    }
+}
 impl From<FloatType> for NumType {
     fn from(val: FloatType) -> Self {
         match val {
@@ -1406,18 +1422,9 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for StartOpts {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
         tokens.next().expect_left_paren()?;
         tokens.next().expect_keyword_token(Keyword::Start)?;
-        let func_id = if let Some(id) = get_id(tokens) {
-            Index::Id(id)
-        } else if let Ok(index) = read_u32(tokens.peek().copied().expect_number()?) {
-            Index::Index(index)
-        } else {
-            return Err(Error::new(
-                tokens.next().cloned(),
-                "'start' block expected index of number or function id.",
-            ));
-        };
+        let index = Index::parse(tokens)?;
         tokens.next().expect_right_paren()?;
-        Ok(Self { func_id })
+        Ok(Self { func_id: index })
     }
 }
 
