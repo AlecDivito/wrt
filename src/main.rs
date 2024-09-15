@@ -1,12 +1,12 @@
-use std::{fs, iter::Peekable, os::unix::ffi::OsStrExt, path::PathBuf};
+use std::{fs, os::unix::ffi::OsStrExt, path::PathBuf};
 
 use clap::{Parser, Subcommand};
 use wrt::{
     parse::{
-        ast::{parse_module_test, parse_module_test_2, walk_tee, Expect},
+        ast::{parse_test_block, TestBlock},
         tokenize, Token,
     },
-    structure::module::Module,
+    validation::{Context, Input, ValidateInstruction},
 };
 
 #[derive(Parser)]
@@ -29,6 +29,18 @@ pub struct Tests {
     #[arg(name = "dir", default_value = "testsuite")]
     directory: PathBuf,
 
+    #[arg(name = "parse", short = 'p', default_value = "false")]
+    parse: bool,
+
+    #[arg(name = "validate", short = 'v', default_value = "false")]
+    validate: bool,
+
+    #[arg(name = "execute", short = 'e', default_value = "false")]
+    execute: bool,
+
+    #[arg(name = "all", short = 'a', default_value = "false")]
+    all: bool,
+
     #[command(subcommand)]
     tests: TestCommands,
 }
@@ -43,6 +55,10 @@ pub enum TestCommands {
 pub struct Options {
     directory: PathBuf,
     debug: bool,
+
+    test_parse_flag: bool,
+    test_validate_flag: bool,
+    test_execute_flag: bool,
 }
 
 impl Options {
@@ -77,32 +93,29 @@ impl Options {
 
     pub fn test_all(&self) -> Result<(), Box<dyn std::error::Error>> {
         let lists = self.get_all_tests()?;
+        let len = lists.len();
         let mut pass = 0;
         let mut fail = 0;
-        for item in &lists {
-            let contents = std::fs::read_to_string(item)?;
-            match tokenize(&contents) {
+        for item in lists {
+            let file = item.clone();
+            let name = file.file_name().unwrap().to_string_lossy();
+            match self.test(item) {
                 Ok(_) => {
                     pass += 1;
-                    println!("PASS {}", item.file_name().unwrap().to_string_lossy())
+                    println!("PASS {}", name)
                 }
                 Err(err) => {
                     fail += 1;
                     if self.debug {
-                        println!(
-                            "FAIL {} - {} at {:?}",
-                            item.file_name().unwrap().to_string_lossy(),
-                            err.error,
-                            err.location
-                        )
+                        println!("FAIL {} with {:?}", name, err)
                     } else {
-                        println!("FAIL {}", item.file_name().unwrap().to_string_lossy())
+                        println!("FAIL {}", name)
                     }
                 }
             };
         }
-        println!("Passed {}/{}", pass, lists.len());
-        println!("Failed {}/{}", fail, lists.len());
+        println!("Passed {}/{}", pass, len);
+        println!("Failed {}/{}", fail, len);
         Ok(())
     }
 
@@ -117,98 +130,72 @@ impl Options {
             println!("Error: file {} does not exist", name);
             return Ok(());
         };
+        self.test(file)
+    }
 
-        let contents = fs::read_to_string(file)?;
-        let tokens = match tokenize(&contents) {
-            Ok(tokens) => {
-                println!("Scanning file and converting to tokens");
-                if self.debug {
-                    println!("{:?}", tokens);
-                }
-                println!("Tokenization complete");
-                tokens
-            }
-            Err(err) => {
-                if self.debug {
-                    println!("Scan Error: {:?}", err)
-                } else {
-                    println!("Scan Error: {:?} at location {:?}", err.error, err.location)
-                }
-                return Ok(());
-            }
-        };
-
-        let mut iter = tokens.iter().peekable();
-        let mut last_parsed_module: Option<Module> = None;
-        // while iter.peek().is_some() {
-        //     let tee = parse_module_test_2(&mut iter).unwrap();
-        //     println!("{}", tee);
-        //     println!("---");
-        // match walk_tee(&tee, last_parsed_module.as_ref()) {
-        //     Ok(Some(module)) => {
-        //         last_parsed_module = Some(module);
-        //         println!("Module parsed successfully...");
-        //     }
-        //     Ok(None) => println!("Passed Test..."),
-        //     Err(err) => {
-        //         let range = if let Some(token) = &err.token() {
-        //             if let Some(index) = tokens.iter().position(|t| t == *token) {
-        //                 if index == 0 {
-        //                     tokens.get(0..=5).unwrap().to_vec()
-        //                 } else {
-        //                     tokens.get(index - 2..=index + 2).unwrap().to_vec()
-        //                 }
-        //             } else {
-        //                 vec![]
-        //             }
-        //         } else {
-        //             vec![]
-        //         };
-
-        //         println!("ERROR");
-        //         println!("========================================");
-        //         println!("{:?}", range);
-        //         let tokens = range.iter().map(|t| t.source()).collect::<Vec<_>>();
-        //         println!("Tokens around error: {:?}", tokens);
-        //         println!("Parsing encounted error {:?}", err);
-        //         return Ok(());
-        //     }
-        // }
-        // }
-        while iter.peek().is_some() {
-            match parse_module_test(&mut iter, last_parsed_module.as_ref()) {
-                Ok(Some(module)) => {
-                    println!("{}", module);
-                    last_parsed_module = Some(module);
-                    println!("Module parsed successfully...");
-                }
-                Ok(None) => println!("Passed Test..."),
-                Err(err) => {
-                    let range = if let Some(token) = &err.token() {
-                        if let Some(index) = tokens.iter().position(|t| t == *token) {
-                            if index == 0 {
-                                tokens.get(0..=5).unwrap().to_vec()
-                            } else {
-                                tokens.get(index - 2..=index + 2).unwrap().to_vec()
-                            }
-                        } else {
-                            vec![]
-                        }
-                    } else {
-                        vec![]
-                    };
-
-                    println!("ERROR");
-                    println!("========================================");
-                    println!("{:?}", range);
-                    let tokens = range.iter().map(|t| t.source()).collect::<Vec<_>>();
-                    println!("Tokens around error: {:?}", tokens);
-                    println!("Parsing encounted error {:?}", err);
-                    return Ok(());
+    pub fn test(&self, file: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+        let path = file.clone();
+        let name = path.file_name().unwrap().to_string_lossy();
+        println!("TEST INPUT {} -------------------------------------", name);
+        let tokens = self.test_tokenization(file)?;
+        println!("PASS(tokenize): {}", name);
+        if self.test_parse_flag {
+            let blocks = self.test_parser(tokens)?;
+            println!("PASS(parser): {}", name);
+            if self.test_validate_flag {
+                self.test_validate(&blocks)?;
+                println!("PASS(validator): {}", name);
+                if self.test_execute_flag {
+                    todo!("Implement test execute");
+                    // println!("PASS(executor): {}", name);
                 }
             }
         }
+        Ok(())
+    }
 
+    pub fn test_tokenization(
+        &self,
+        file: PathBuf,
+    ) -> Result<Vec<Token>, Box<dyn std::error::Error>> {
+        let contents = fs::read_to_string(file)?;
+        println!("Scanning file and converting to tokens");
+        let tokens = tokenize(&contents)?;
+        if self.debug {
+            println!("{:?}", tokens);
+        }
+        println!("Tokenization complete");
+        Ok(tokens)
+    }
+
+    pub fn test_parser(
+        &self,
+        tokens: Vec<Token>,
+    ) -> Result<Vec<TestBlock>, Box<dyn std::error::Error>> {
+        let mut blocks = vec![];
+        let mut iter = tokens.iter().peekable();
+        while iter.peek().is_some() {
+            blocks.push(parse_test_block(&mut iter, &tokens)?);
+        }
+        Ok(blocks)
+    }
+
+    pub fn test_validate(&self, blocks: &[TestBlock]) -> Result<(), Box<dyn std::error::Error>> {
+        let mut last_module = None;
+        for block in blocks.iter() {
+            match (block, last_module) {
+                (TestBlock::Module(module), _) => {
+                    last_module = Some(module);
+                    let mut ctx = Context::default();
+                    let mut inputs = Input::default();
+                    module.validate(&mut ctx, &mut inputs)?;
+                }
+                (TestBlock::AssertMalformed(module), _) => module.test()?,
+                (TestBlock::AssertInvalid(module), _) => module.test()?,
+                (TestBlock::AssertReturn(module), Some(last)) => module.test(last)?,
+                _ => panic!("THis shouldn't happen"),
+            }
+        }
         Ok(())
     }
 }
@@ -221,6 +208,9 @@ fn main() {
             let opts = Options {
                 directory: test.directory.clone(),
                 debug: cli.debug,
+                test_parse_flag: test.all || test.parse,
+                test_validate_flag: test.all || (test.parse && test.validate),
+                test_execute_flag: test.all || (test.parse && test.validate && test.execute),
             };
             match test.tests {
                 TestCommands::List => opts.list_tests(),

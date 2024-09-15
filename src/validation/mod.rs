@@ -41,19 +41,11 @@
 
 pub mod instruction;
 
-use std::{collections::HashMap, convert::TryFrom, iter::Peekable};
+use std::convert::TryFrom;
 
-use instruction::Const;
-
-use crate::{
-    parse::{
-        ast::{read_number, Error, Expect, Parse},
-        Keyword, Token,
-    },
-    structure::types::{
-        FunctionDefinition, FunctionIndex, FunctionType, GlobalType, Index, MemoryType, RefType,
-        ResultType, TableType, TypeDefinition, TypeUse, ValueType, Variable,
-    },
+use crate::structure::types::{
+    FunctionDefinition, FunctionIndex, FunctionType, GlobalType, Index, MemoryType, RefType,
+    ResultType, TableType, TypeDefinition, ValueType, Variable,
 };
 
 /// Representation of the validation context of a [Data] segment inside of a
@@ -118,7 +110,7 @@ impl Context {
         self.types.find(index)
     }
 
-    pub fn push_function(&mut self, def: &FunctionDefinition) -> Result<(), ValidationError> {
+    pub fn push_function(&mut self, _: &FunctionDefinition) -> Result<(), ValidationError> {
         todo!("Holy man");
         // let ty = match def.ty() {
         //     TypeUse::Index(index) => self.get_type(index)?.clone(),
@@ -127,7 +119,7 @@ impl Context {
         //     }
         // };
         // self.functions.push(def.id().cloned(), ty);
-        Ok(())
+        // Ok(())
     }
 
     pub fn get_function(&self, index: &Index) -> Result<&FunctionType, ValidationError> {
@@ -176,7 +168,7 @@ impl Context {
         // }
     }
 
-    pub fn prepend_label(&mut self, ty: ResultType) {
+    pub fn prepend_label(&mut self, _: ResultType) {
         todo!("aaahhh")
         // self.labels.push(ty)
     }
@@ -191,7 +183,7 @@ impl Context {
     //     self.locals.get(index).ok_or_else(ValidationError::new)
     // }
 
-    pub fn set_local(&mut self, index: u32, ty: ValueType) -> Result<(), ValidationError> {
+    pub fn set_local(&mut self, _: u32, _: ValueType) -> Result<(), ValidationError> {
         todo!("set_local");
         // let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
         // if self.locals.get(index).is_some() {
@@ -206,7 +198,7 @@ impl Context {
         self.globals.find(index)
     }
 
-    pub fn set_global(&mut self, index: u32, ty: ValueType) -> Result<(), ValidationError> {
+    pub fn set_global(&mut self, _: u32, _: ValueType) -> Result<(), ValidationError> {
         todo!("set_global")
         // let index = usize::try_from(index).map_err(|_| ValidationError::new())?;
         // match self.globals.get(index) {
@@ -228,9 +220,9 @@ impl Context {
         self.references.get(index)
     }
 
-    fn contains_reference(&self, arg: u32) -> bool {
-        self.references.contains(&arg)
-    }
+    // fn contains_reference(&self, arg: u32) -> bool {
+    //     self.references.contains(&arg)
+    // }
 
     pub fn set_returning(&mut self, opt: Option<ResultType>) {
         self.returning = opt;
@@ -277,12 +269,11 @@ pub enum ValidationErrorTy {
     MultipleMemories,
 }
 
-impl ToString for ValidationErrorTy {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for ValidationErrorTy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::MultipleMemories => "multiple memories",
+            Self::MultipleMemories => write!(f, "multiple memories"),
         }
-        .to_string()
     }
 }
 
@@ -290,6 +281,14 @@ impl ToString for ValidationErrorTy {
 pub struct ValidationError {
     error: Option<String>,
     ty: Option<ValidationErrorTy>,
+}
+
+impl std::error::Error for ValidationError {}
+
+impl std::fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TODO: make better {:?}", self)
+    }
 }
 
 impl ValidationError {
@@ -319,6 +318,12 @@ impl ValidationError {
     }
 }
 
+impl Default for ValidationError {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub type ValidateResult<T> = Result<T, ValidationError>;
 
 pub struct Input(pub Vec<ValueType>);
@@ -329,6 +334,12 @@ impl Input {
     }
     pub fn pop(&mut self) -> ValidateResult<ValueType> {
         self.0.pop().ok_or_else(ValidationError::new)
+    }
+}
+
+impl Default for Input {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

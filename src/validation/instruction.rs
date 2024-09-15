@@ -10,17 +10,17 @@ use crate::{
         module::{get_id, get_next_keyword},
         types::{
             BlockType, DataIndex, ElementIndex, FloatVectorShape, FuncResult, FunctionIndex,
-            FunctionReference, GlobalType, HalfType, Index, Instruction, IntType,
-            IntegerVectorShape, LocalIndex, MemoryArgument, MemoryIndex, MemoryLoadNumber,
-            MemoryWidth, MemoryZeroWidth, NumType, RefType, SignType, TableIndex, TypeIndex,
-            ValueType, VecType, VectorMemoryOp, VectorShape,
+            GlobalType, HalfType, HeapType, Index, Instruction, IntType, IntegerVectorShape,
+            LocalIndex, MemoryArgument, MemoryIndex, MemoryLoadNumber, MemoryWidth,
+            MemoryZeroWidth, NumType, RefType, SignType, TableIndex, TypeIndex, ValueType, VecType,
+            VectorMemoryOp, VectorShape,
         },
     },
 };
 
 use super::{Context, Input, ValidateInstruction, ValidateResult, ValidationError};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Operation {
     Const(Const),
     Nop(NopOperation),
@@ -48,6 +48,11 @@ pub enum Operation {
 
     // Binary
     Binary(BinaryOperation),
+
+    // Reference
+    RefNull(RefNull),
+    RefIsNull(RefIsNull),
+    RefFunc(RefFunc),
 }
 impl Default for Operation {
     fn default() -> Self {
@@ -75,6 +80,9 @@ impl ValidateInstruction for Operation {
             Operation::Test(v) => v.validate(ctx, inputs),
             Operation::Unary(v) => v.validate(ctx, inputs),
             Operation::Binary(v) => v.validate(ctx, inputs),
+            Operation::RefNull(v) => v.validate(ctx, inputs),
+            Operation::RefFunc(v) => v.validate(ctx, inputs),
+            Operation::RefIsNull(v) => v.validate(ctx, inputs),
         }
     }
 }
@@ -127,6 +135,9 @@ impl std::fmt::Display for Operation {
             Operation::Test(opt) => write!(f, "{}", opt),
             Operation::Unary(opt) => write!(f, "{}", opt),
             Operation::Binary(opt) => write!(f, "{}", opt),
+            Operation::RefNull(opt) => write!(f, "{}", opt),
+            Operation::RefFunc(opt) => write!(f, "{}", opt),
+            Operation::RefIsNull(opt) => write!(f, "{}", opt),
         }
     }
 }
@@ -186,9 +197,9 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Operation {
             Keyword::I64Store32 => todo!(),
             Keyword::MemArgsAlign(_) => todo!(),
             Keyword::MemArgsOffset(_) => todo!(),
-            Keyword::Declare => todo!(),
-            Keyword::Offset => todo!(),
-            Keyword::Item => todo!(),
+            // Keyword::Declare => todo!(),
+            // Keyword::Offset => todo!(),
+            // Keyword::Item => todo!(),
             Keyword::V128Load => todo!(),
             Keyword::V128Store => todo!(),
             Keyword::VecLoad8x8(_) => todo!(),
@@ -203,10 +214,10 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Operation {
                 Operation::Const(Const::new(expected, value))
             }
             Keyword::ConstV128 => todo!(),
-            Keyword::RefNull => todo!(),
-            Keyword::RefFunc => todo!(),
+            Keyword::RefNull => Operation::RefNull(RefNull::parse(tokens)?),
+            Keyword::RefFunc => Operation::RefFunc(RefFunc::parse(tokens)?),
+            Keyword::RefIsNull => Operation::RefIsNull(RefIsNull),
             Keyword::RefExtern => todo!(),
-            Keyword::RefIsNull => todo!(),
             Keyword::IntClz(_) => todo!(),
             Keyword::IntCtz(_) => todo!(),
             Keyword::IntPopCnt(_) => todo!(),
@@ -408,7 +419,7 @@ pub trait Execute {
  */
 
 // Validate Const operations
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Const {
     ty: NumType,
     value: Number,
@@ -463,7 +474,7 @@ impl Execute for Const {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum UnaryFunction {
     // interger
     Clz,
@@ -496,7 +507,7 @@ impl std::fmt::Display for UnaryFunction {
 }
 
 // Validate Unary Operations. Only available for numbers.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct UnaryOperation {
     ty: NumType,
     op: UnaryFunction,
@@ -531,7 +542,7 @@ impl Execute for UnaryOperation {
 }
 
 // Validate Binary Operation. Only avaliable for numbers.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum BinaryFunction {
     Add(IntType),
 }
@@ -547,7 +558,7 @@ impl Default for BinaryFunction {
         Self::Add(IntType::default())
     }
 }
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct BinaryOperation {
     func: BinaryFunction,
 }
@@ -575,7 +586,7 @@ impl ValidateInstruction for BinaryOperation {
 }
 
 // Validate test operations. Only avalible for numbers
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TestOperation {
     ty: IntType,
 }
@@ -667,20 +678,21 @@ pub struct FunctionReferenceOperation {
 impl ValidateInstruction for FunctionReferenceOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let _ = ctx.get_function(&Index::Index(self.function_index))?;
-        if ctx.contains_reference(self.function_index) {
-            // Reference: https://webassembly.github.io/spec/core/valid/instructions.html#xref-syntax-instructions-syntax-instr-ref-mathsf-ref-func-x
-            // TODO(Alec): We are supposed to be returning a function ref
-            // A function ref is basically a pointer to a function
-            // At runtime we validate if the function call is given the correct
-            // arguments. So i think just returning the index to the function
-            // should be ok because it's technically a pointer.
-            return Ok(vec![ValueType::RefType(RefType::FuncRef(
-                self.function_index as FunctionReference,
-            ))]);
-        } else {
-            Err(ValidationError::new())
-        }
+        todo!("Validation is another day :(")
+        // let _ = ctx.get_function(&Index::Index(self.function_index))?;
+        // if ctx.contains_reference(self.function_index) {
+        //     // Reference: https://webassembly.github.io/spec/core/valid/instructions.html#xref-syntax-instructions-syntax-instr-ref-mathsf-ref-func-x
+        //     // TODO(Alec): We are supposed to be returning a function ref
+        //     // A function ref is basically a pointer to a function
+        //     // At runtime we validate if the function call is given the correct
+        //     // arguments. So i think just returning the index to the function
+        //     // should be ok because it's technically a pointer.
+        //     return Ok(vec![ValueType::RefType(RefType::FuncRef(
+        //         self.function_index as FunctionReference,
+        //     ))]);
+        // } else {
+        //     Err(ValidationError::new())
+        // }
     }
 }
 
@@ -1025,7 +1037,7 @@ impl ValidateInstruction for VectorShapeExtendAddPairWiseOperation {
 /**
  * Parametric Instructions
  */
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DropOperation {}
 impl std::fmt::Display for DropOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1044,7 +1056,7 @@ impl ValidateInstruction for DropOperation {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SelectOperation {
     t: Option<ValueType>,
 
@@ -1112,7 +1124,7 @@ impl ValidateInstruction for SelectOperation {
  * Variable Instructions
  */
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LocalGetOperation {
     index: Index,
 }
@@ -1160,7 +1172,7 @@ impl ValidateInstruction for LocalTeeOperation {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct GlobalGetOperation {
     index: Index,
 }
@@ -1645,7 +1657,7 @@ impl ValidateInstruction for DataDrop {
 /**
  * Control Instructions
  */
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct NopOperation;
 impl std::fmt::Display for NopOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1664,7 +1676,7 @@ impl ValidateInstruction for NopOperation {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct UnreachableOperation;
 impl std::fmt::Display for UnreachableOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1680,7 +1692,7 @@ impl ValidateInstruction for UnreachableOperation {
 }
 
 // block _blocktype_ _instr_* end
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct BlockOperation {
     label: Option<String>,
     ty: Option<BlockType>,
@@ -1757,7 +1769,7 @@ impl ValidateInstruction for BlockOperation {
 }
 
 // loop _blocktype_ _instr_* end
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct LoopOperation {
     label: Option<String>,
     ty: Option<BlockType>,
@@ -1824,7 +1836,7 @@ impl ValidateInstruction for LoopOperation {
 }
 
 // if _blocktype_ _instr_* else _instr_* end
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct IfOperation {
     label: Option<String>,
     ty: Option<BlockType>,
@@ -1935,7 +1947,7 @@ impl ValidateInstruction for IfOperation {
         // Err(ValidationError::new())
     }
 }
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct BrOperation {
     label: Index,
 }
@@ -1967,7 +1979,7 @@ impl ValidateInstruction for BrOperation {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct BrIfOperation {
     label: Index,
 }
@@ -2001,7 +2013,7 @@ impl ValidateInstruction for BrIfOperation {
 
 ////////////////////////////////////////////////////////////////////////////////
 /// https://webassembly.github.io/spec/core/valid/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-br-table-l-ast-l-n
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct BrTableOperation {
     labels: Vec<Index>,
 }
@@ -2081,7 +2093,7 @@ impl ValidateInstruction for BrTableOperation {
 
 // Come back and review
 // https://webassembly.github.io/spec/core/valid/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-return
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct ReturnOperation;
 impl std::fmt::Display for ReturnOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -2100,7 +2112,7 @@ impl ValidateInstruction for ReturnOperation {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CallOperation {
     index: Index,
 }
@@ -2152,5 +2164,71 @@ impl ValidateInstruction for CallIndirectOperation {
         //     let _ = inputs.pop()?.try_into_value_type(&input_ty)?;
         // }
         // Ok(ty.output().values().to_vec())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RefNull {
+    ty: HeapType,
+}
+impl ValidateInstruction for RefNull {
+    fn validate(&self, _: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
+        Ok(vec![ValueType::RefType(self.ty.into())])
+    }
+}
+impl std::fmt::Display for RefNull {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(ref.null {})", self.ty)
+    }
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for RefNull {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        Ok(Self {
+            ty: HeapType::parse(tokens)?,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RefIsNull;
+impl ValidateInstruction for RefIsNull {
+    fn validate(&self, _: &mut Context, input: &mut Input) -> ValidateResult<Vec<ValueType>> {
+        input.pop()?.try_into_ref_type()?;
+        Ok(vec![ValueType::Num(NumType::I32)])
+    }
+}
+impl std::fmt::Display for RefIsNull {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(ref.is_null)")
+    }
+}
+#[derive(Clone, Debug)]
+pub struct RefFunc {
+    index: Index,
+}
+
+impl RefFunc {
+    pub fn new(index: Index) -> Self {
+        Self { index }
+    }
+}
+impl ValidateInstruction for RefFunc {
+    fn validate(&self, ctx: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
+        ctx.get_function(&self.index)?;
+        todo!("implement get_ref");
+        // ctx.get_ref(&self.index)
+        // Ok(vec![ValueType::RefType(RefType::FuncRef)])
+    }
+}
+impl std::fmt::Display for RefFunc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(ref.func {})", self.index)
+    }
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for RefFunc {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        Ok(Self {
+            index: Index::parse(tokens)?,
+        })
     }
 }

@@ -3,16 +3,16 @@ use std::iter::Peekable;
 use crate::{
     execution::{ModuleInstance, Store, PAGE_SIZE},
     parse::{
-        ast::{read_u32, Error, Expect, Parse, TryGet},
-        tokenize, Keyword, Token,
+        ast::{read_u32, write_optional, Error, Expect, Parse, TryGet},
+        tokenize, Keyword, Token, TokenType,
     },
     validation::{
-        instruction::{Const, Execute, Operation},
+        instruction::{Const, Execute, Operation, RefFunc},
         Context, Input, ValidateInstruction, ValidateResult, Validation, ValidationError,
     },
 };
 
-use super::module::{get_id, get_index, get_next_keyword, DataMode, Module};
+use super::module::{get_id, get_index, get_next_keyword, DataMode, ElementMode, Module};
 
 /// Type of sign an integer is meant to taken as
 ///
@@ -31,7 +31,7 @@ pub enum HalfType {
     High,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum BlockType {
     Index(Index),
     Value(Vec<Variable>), // return variables
@@ -63,7 +63,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BlockType {
                 Ok(BlockType::Value(results))
             }
             Some(keyword) => Err(Error::new(
-                tokens.skip(1).next().cloned(),
+                tokens.nth(1).cloned(),
                 format!(
                     "keyword {:?} was not expected for 'block' return type",
                     keyword
@@ -71,7 +71,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BlockType {
             )),
             None => Err(Error::new(
                 tokens.next().cloned(),
-                format!("keyword was not found for 'block' return type"),
+                "keyword was not found for 'block' return type".to_string(),
             )),
         }
     }
@@ -366,6 +366,10 @@ impl MemoryArgument {
     pub fn align(&self) -> u32 {
         self.align
     }
+
+    pub fn offset(&self) -> u32 {
+        self.offset
+    }
 }
 
 /// Classify linear ['Memories'] and their size range.
@@ -569,10 +573,7 @@ impl ResultType {
     }
 
     pub fn values(&self) -> Vec<ValueType> {
-        self.values
-            .iter()
-            .map(|i| i.ty().clone())
-            .collect::<Vec<_>>()
+        self.values.iter().map(|i| *i.ty()).collect::<Vec<_>>()
     }
 
     pub fn take(self) -> Vec<Variable> {
@@ -588,16 +589,9 @@ impl ResultType {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct FuncParam {
     var: Vec<Variable>,
-}
-impl Default for FuncParam {
-    fn default() -> Self {
-        Self {
-            var: Default::default(),
-        }
-    }
 }
 impl FuncParam {
     pub fn ty(&self) -> ResultType {
@@ -697,12 +691,14 @@ impl TypeDefinition {
     }
 }
 
-// impl Visit for TypeDefinition {
-//     fn visit(tee: &Tee) -> Result<Self, Error> {
-//         let mut this = Self::default();
-//         this.id = tee.find_id();
-//     }
-// }
+impl std::fmt::Display for TypeDefinition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(type ")?;
+        write_optional(f, " $", self.id.as_ref())?;
+        write!(f, "(func {} {}))", self.params, self.result)?;
+        Ok(())
+    }
+}
 
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for TypeDefinition {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
@@ -829,6 +825,43 @@ impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for ValueType {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ElementRefType {
+    Ref(RefType),
+    Heap(HeapType),
+}
+
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for ElementRefType {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, Error> {
+        Ok(match tokens.peek().cloned().expect_keyword()? {
+            Keyword::ExternRef | Keyword::FuncRef => Self::Ref(RefType::parse(tokens)?),
+            Keyword::Extern | Keyword::Func => Self::Heap(HeapType::parse(tokens)?),
+            keyword => {
+                return Err(Error::new(
+                    tokens.next().cloned(),
+                    format!("Expected ElementRefType token. Got {:?} instead.", keyword),
+                ))
+            }
+        })
+    }
+}
+
+impl std::fmt::Display for ElementRefType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ElementRefType::Ref(v) => write!(f, "{}", v),
+            ElementRefType::Heap(v) => write!(f, "{}", v),
+        }
+    }
+}
+
+impl Default for ElementRefType {
+    fn default() -> Self {
+        // TODO(Alec): This is not based in reality.
+        ElementRefType::Ref(RefType::ExternRef)
+    }
+}
+
 /// First class references to objects in the runtime ["Store"].
 ///
 /// Reference types are opaque, meaning that neither their size nor their bit
@@ -837,17 +870,19 @@ impl<'a, I: Iterator<Item = &'a Token>> Parse<'a, I> for ValueType {
 pub enum RefType {
     // FunctionReference must exist, however, we don't know what it takes and we don't
     // know what it returns. The Function must exist in the program.
-    FuncRef(FunctionReference),
+    FuncRef,
     // A reference to a host resource. The resource should be owned by the ["Embedder"].
     // This is a type of pointer.
-    ExternRef(ExternRef),
+    ExternRef,
 }
 
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for RefType {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, Error> {
         Ok(match tokens.next().expect_keyword()? {
-            Keyword::FuncRef => Self::FuncRef(0),
-            Keyword::ExternRef => Self::ExternRef(0),
+            // TODO(Alec): This technically isn't right...is it? because we can reference
+            // a heap type. Maybe it doesn't matter. I guess the future will tell us.
+            Keyword::Func | Keyword::FuncRef => Self::FuncRef,
+            Keyword::Extern | Keyword::ExternRef => Self::ExternRef,
             keyword => {
                 return Err(Error::new(
                     tokens.next().cloned(),
@@ -860,20 +895,57 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for RefType {
 
 impl std::fmt::Display for RefType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        match self {
+            RefType::FuncRef => write!(f, "funcref"),
+            RefType::ExternRef => write!(f, "externref"),
+        }
     }
 }
 impl Default for RefType {
     fn default() -> Self {
-        Self::ExternRef(ExternRef::default())
+        Self::ExternRef
     }
 }
-impl RefType {
-    pub fn try_into_func_ref(self) -> Result<FunctionReference, ValidationError> {
-        if let Self::FuncRef(v) = self {
-            Ok(v)
-        } else {
-            Err(ValidationError::new())
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeapType {
+    // FunctionReference must exist, however, we don't know what it takes and we don't
+    // know what it returns. The Function must exist in the program.
+    Func,
+    // A reference to a host resource. The resource should be owned by the ["Embedder"].
+    // This is a type of pointer.
+    Extern,
+}
+
+impl From<HeapType> for RefType {
+    fn from(val: HeapType) -> Self {
+        match val {
+            HeapType::Func => RefType::FuncRef,
+            HeapType::Extern => RefType::ExternRef,
+        }
+    }
+}
+
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for HeapType {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, Error> {
+        Ok(match tokens.next().expect_keyword()? {
+            Keyword::Func => Self::Func,
+            Keyword::Extern => Self::Extern,
+            keyword => {
+                return Err(Error::new(
+                    tokens.next().cloned(),
+                    format!("Expected RefType token. Got {:?} instead.", keyword),
+                ))
+            }
+        })
+    }
+}
+
+impl std::fmt::Display for HeapType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HeapType::Func => write!(f, "func"),
+            HeapType::Extern => write!(f, "extern"),
         }
     }
 }
@@ -1238,13 +1310,13 @@ impl TypeUse {
 impl std::fmt::Display for TypeUse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(index) = self.index.as_ref() {
-            write!(f, "(type {}) ", index)?;
+            write!(f, " (type {})", index)?;
         }
         for param in self.params.as_ref() {
-            write!(f, "(param {}) ", param)?;
+            write!(f, " (param {})", param)?;
         }
         for result in self.results.as_ref() {
-            write!(f, "(result {}) ", result)?;
+            write!(f, " (result {})", result)?;
         }
         Ok(())
     }
@@ -1276,8 +1348,40 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for TypeUse {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct TableUse {
+    index: Index,
+}
+
+impl TableUse {
+    pub fn index(&self) -> &Index {
+        &self.index
+    }
+}
+impl std::fmt::Display for TableUse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(table {})", self.index)
+    }
+}
+
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for TableUse {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::Table)?;
+        let index = Index::parse(tokens)?;
+        tokens.next().expect_right_paren()?;
+        Ok(Self { index })
+    }
+}
+
 pub struct StartOpts {
     func_id: Index,
+}
+
+impl std::fmt::Display for StartOpts {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(start {})", self.func_id)
+    }
 }
 
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for StartOpts {
@@ -1301,7 +1405,11 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for StartOpts {
 
 #[derive(Clone)]
 pub struct UseMemory(Index);
-
+impl std::fmt::Display for UseMemory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(memory {})", self.0)
+    }
+}
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for UseMemory {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
         tokens.next().expect_left_paren()?;
@@ -1312,10 +1420,11 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for UseMemory {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub struct Instruction {
     instructions: Vec<Operation>,
 }
+
 impl std::fmt::Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for instr in self.instructions.iter() {
@@ -1328,18 +1437,42 @@ impl std::fmt::Display for Instruction {
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Instruction {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
         let mut instructions = vec![];
-        while tokens.peek().copied().expect_left_paren().is_ok() {
-            tokens.next().expect_left_paren()?;
-            let op = Operation::parse(tokens)?;
-            // If the instructions are written in S-Expression, process this first
-            while tokens.peek().copied().expect_left_paren().is_ok() {
-                let instr = Instruction::parse(tokens)?;
-                instructions.extend(instr.instructions);
+        // TODO(Alec): we need to work on this :( very sad
+        loop {
+            if tokens.peek().copied().expect_left_paren().is_ok() {
+                tokens.next().expect_left_paren()?;
+                let op = Operation::parse(tokens)?;
+                while tokens.peek().copied().expect_left_paren().is_ok() {
+                    let instr = Instruction::parse(tokens)?;
+                    instructions.extend(instr.instructions);
+                }
+                instructions.push(op);
+                tokens.next().expect_right_paren()?;
+            } else if tokens.peek().copied().expect_right_paren().is_err() {
+                let op = Operation::parse(tokens)?;
+                while tokens.peek().copied().expect_left_paren().is_ok() {
+                    let instr = Instruction::parse(tokens)?;
+                    instructions.extend(instr.instructions);
+                }
+                instructions.push(op);
+            } else if tokens.peek().copied().expect_right_paren().is_ok() {
+                return Ok(Instruction { instructions });
+            } else {
+                unreachable!()
             }
-            instructions.push(op);
-            tokens.next().expect_right_paren()?;
         }
-        Ok(Instruction { instructions })
+
+        // while tokens.peek().copied().expect_left_paren().is_ok() {
+        //     tokens.next().expect_left_paren()?;
+        //     let op = Operation::parse(tokens)?;
+        //     // If the instructions are written in S-Expression, process this first
+        //     while tokens.peek().copied().expect_left_paren().is_ok() {
+        //         let instr = Instruction::parse(tokens)?;
+        //         instructions.extend(instr.instructions);
+        //     }
+        //     instructions.push(op);
+        //     tokens.next().expect_right_paren()?;
+        // }
     }
 }
 impl ValidateInstruction for Instruction {
@@ -1357,22 +1490,38 @@ impl Instruction {
         }
     }
 
+    pub fn create(instructions: Vec<Operation>) -> Self {
+        Self { instructions }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.instructions.is_empty()
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct OffsetExpr(Instruction);
+impl std::fmt::Display for OffsetExpr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(offset {})", self.0)
+    }
+}
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for OffsetExpr {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
-        tokens.next().expect_left_paren()?;
-        let instr = match tokens.next().expect_keyword()? {
-            Keyword::Offset => {
+        let instr = match get_next_keyword(tokens) {
+            Some(Keyword::Offset) => {
                 tokens.next().expect_left_paren()?;
-                Instruction::parse(tokens)?
+                tokens.next().expect_keyword_token(Keyword::Offset)?;
+                let instruction = Instruction::parse(tokens)?;
+                tokens.next().expect_right_paren()?;
+                instruction
             }
-            key if key.has_unary_return_ty_i32() => Instruction::parse(tokens)?,
+            Some(key) if key.has_unary_return_ty_i32() => {
+                tokens.next().expect_left_paren()?;
+                let instruction = Instruction::create(vec![Operation::parse(tokens)?]);
+                tokens.next().expect_right_paren()?;
+                instruction
+            }
             key => {
                 return Err(Error::new(
                     tokens.next().cloned(),
@@ -1382,6 +1531,11 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for OffsetExpr {
         };
 
         Ok(Self(instr))
+    }
+}
+impl ValidateInstruction for OffsetExpr {
+    fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
+        self.0.validate(ctx, inputs)
     }
 }
 
@@ -1404,6 +1558,12 @@ impl DataOps {
     pub fn limit(&self) -> Limit {
         let max = self.data.as_bytes().len().div_ceil(PAGE_SIZE);
         Limit::new(0, Some(max as u32))
+    }
+}
+
+impl std::fmt::Display for DataOps {
+    fn fmt(&self, _: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!("This is for memory, but i don't want to deal with it right now. Will come back.")
     }
 }
 
@@ -1440,7 +1600,19 @@ pub struct MemoryOpts {
     export: Option<RelativeExport>,
     data: Option<DataOps>,
 }
-
+impl std::fmt::Display for MemoryOpts {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(memory")?;
+        write_optional(f, " $", self.id.as_ref())?;
+        write_optional(f, " ", self.import.as_ref())?;
+        write_optional(f, " ", self.export.as_ref())?;
+        write!(f, " {})", self.limit)?;
+        match self.data.as_ref() {
+            Some(data) => write!(f, "\n{}", data),
+            None => Ok(()),
+        }
+    }
+}
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for MemoryOpts {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
         let mut this = Self::default();
@@ -1498,59 +1670,13 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for MemoryOpts {
     }
 }
 
-pub struct BlockInstruction {
-    id: Option<String>,
-
-    result: Vec<ValueType>,
-}
-
-impl BlockInstruction {
-    pub fn empty(id: Option<String>) -> Self {
-        Self::new(id, vec![])
-    }
-
-    pub fn new(id: Option<String>, result: Vec<ValueType>) -> Self {
-        Self { id, result }
-    }
-}
-
-// impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for BlockInstruction {
-//     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
-//         tokens.next().expect_left_paren()?;
-//         tokens.next().expect_keyword_token(Keyword::Block)?;
-//         let id = get_id(tokens);
-//         if tokens.peek().copied().try_right_paran().is_some() {
-//             return Ok(BlockInstruction::empty(id))
-//         }
-
-//         // Try and expect the result
-//         tokens.peek().copied().expect_left_paren()?;
-//         let result = match tokens.clone().nth(1).expect_keyword()? {
-//             Keyword::Result => ResultType::parse(tokens)?.take(),
-//             Keyword::Type => Ty
-//             keyword => return Err(Error::new(None, format!("Did not expect '{keyword:?}' when parsing block")))
-//         };
-//         let result = if let Ok(_) =  {
-
-//         } else {
-//             vec![]
-//         };
-//         if tokens.peek().copied().try_right_paran().is_some() {
-//             return Ok(BlockInstruction::new(id, result))
-//         }
-
-//         // 1.
-
-//     }
-// }
-
 pub struct AssertMalformed {
     wat: String,
     expected_error: String,
 }
 
 impl AssertMalformed {
-    pub fn test(self) -> Result<(), Error> {
+    pub fn test(&self) -> Result<(), Error> {
         let module = format!("(module {})", self.wat);
         let tokens = tokenize(&module)?;
         let mut iter = tokens.iter().peekable();
@@ -1599,7 +1725,7 @@ pub struct AssertInvalid {
 }
 
 impl AssertInvalid {
-    pub fn test(self) -> Result<(), Error> {
+    pub fn test(&self) -> Result<(), Error> {
         let mut ctx = Context::default();
         let mut input = Input::new();
         match self.module.validate(&mut ctx, &mut input) {
@@ -1644,7 +1770,7 @@ pub struct AssertReturn {
 }
 
 impl AssertReturn {
-    pub fn test(self, module: &Module) -> Result<(), Error> {
+    pub fn test(&self, module: &Module) -> Result<(), Error> {
         // store is global state
         let mut store = Store::default();
 
@@ -1724,16 +1850,12 @@ pub struct FunctionDefinition {
 impl std::fmt::Display for FunctionDefinition {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "(func")?;
-        if let Some(id) = self.id.as_ref() {
-            write!(f, " ${}", id)?;
-        }
-        if let Some(import) = self.import.as_ref() {
-            write!(f, " {}", import)?;
-        }
+        write_optional(f, " $", self.id.as_ref())?;
+        write_optional(f, " ", self.import.as_ref())?;
         for export in self.export.iter() {
             write!(f, " {}", export)?;
         }
-        write!(f, " {}", self.ty)?;
+        write!(f, "{}", self.ty)?;
         for local in self.locals.iter() {
             write!(f, " (local {})", local)?;
         }
@@ -1793,7 +1915,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for FunctionDefinit
 }
 
 impl ValidateInstruction for FunctionDefinition {
-    fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
+    fn validate(&self, _: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
         todo!("Alec, we need to fix the TypeUse issue, everything should change into an index :(");
         // let ty = if let Some(ty) = &self.ty {
         //     ctx.get_type(ty.try_into_index().as_ref().unwrap())?.clone()
@@ -1834,6 +1956,16 @@ pub struct GlobalDefinition {
     // instructions
     // init: Instruction,
     init: Const,
+}
+
+impl std::fmt::Display for GlobalDefinition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(global",)?;
+        write_optional(f, " $", self.id.as_ref())?;
+        write_optional(f, " ", self.import.as_ref())?;
+        write_optional(f, " ", self.export.as_ref())?;
+        write!(f, " {} {})", self.ty, self.init)
+    }
 }
 
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for GlobalDefinition {
@@ -1888,6 +2020,16 @@ pub struct TableDefinition {
     export: Option<RelativeExport>,
     // Global information
     ty: TableType,
+}
+
+impl std::fmt::Display for TableDefinition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(table")?;
+        write_optional(f, " $", self.id.as_ref())?;
+        write_optional(f, " ", self.import.as_ref())?;
+        write_optional(f, " ", self.export.as_ref())?;
+        write!(f, " {})", self.ty)
+    }
 }
 
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for TableDefinition {
@@ -2006,5 +2148,151 @@ impl std::fmt::Display for DataDefinition {
         // TODO(Alec): data.clone()...really...
         write!(f, " \"{}\")", String::from_utf8(self.data.clone()).unwrap())?;
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ElementDefinition {
+    id: Option<String>,
+    // Default table is 0
+    mode: ElementMode,
+    ty: RefType,
+    init: Vec<Instruction>,
+}
+
+impl std::fmt::Display for ElementDefinition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(elem")?;
+        write_optional(f, " $", self.id.as_ref())?;
+        match &self.mode {
+            ElementMode::Passive => {}
+            ElementMode::Declarative => write!(f, " declare")?,
+            ElementMode::Active { table, offset } => write!(f, " {} {}", table, offset)?,
+        }
+        if self.init.is_empty() {
+            write!(f, " {})", self.ty)
+        } else {
+            writeln!(f, " {}", self.ty)?;
+            for init in &self.init {
+                write!(f, " {}", init)?;
+            }
+            write!(f, "  )")
+        }
+    }
+}
+
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for ElementDefinition {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        let mut this = Self::default();
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::Elem)?;
+
+        this.id = get_id(tokens);
+
+        this.mode = if let Some(Keyword::Table) = get_next_keyword(tokens) {
+            ElementMode::Active {
+                table: TableUse::parse(tokens)?,
+                // TODO(Alec): We have similar logic here and at the bottom of this function :(
+                // It would be better to understand offset and item instead and then
+                // parse a constant expression.
+                offset: OffsetExpr::parse(tokens)?,
+            }
+        } else if let Some(Keyword::Offset) = get_next_keyword(tokens) {
+            ElementMode::Active {
+                table: TableUse::default(),
+                // TODO(Alec): We have similar logic here and at the bottom of this function :(
+                // It would be better to understand offset and item instead and then
+                // parse a constant expression.
+                offset: OffsetExpr::parse(tokens)?,
+            }
+        } else if tokens
+            .peek()
+            .cloned()
+            .expect_keyword_token(Keyword::Declare)
+            .is_ok()
+        {
+            tokens.next().expect_keyword_token(Keyword::Declare)?;
+            ElementMode::Declarative
+        } else {
+            ElementMode::Passive
+        };
+
+        // The default RefType seems to be `funcref` with a list of `ref.func` instructions (which would be 0)
+        if tokens.peek().cloned().expect_right_paren().is_ok() {
+            tokens.next().expect_right_paren()?;
+            this.ty = RefType::FuncRef;
+            return Ok(this);
+        }
+
+        if tokens.peek().cloned().try_id().is_some() {
+            while let Some(token) = tokens.peek() {
+                if *token.ty() == TokenType::Id || *token.ty() == TokenType::Number {
+                    this.init
+                        .push(Instruction::create(vec![Operation::RefFunc(RefFunc::new(
+                            Index::parse(tokens)?,
+                        ))]));
+                } else {
+                    break;
+                }
+            }
+            tokens.next().expect_right_paren()?;
+            this.ty = RefType::FuncRef;
+            return Ok(this);
+        }
+
+        let ty = match ElementRefType::parse(tokens) {
+            Ok(ty) => ty,
+            Err(_) => ElementRefType::Ref(RefType::FuncRef),
+        };
+        this.ty = match ty {
+            ElementRefType::Ref(ty) => ty,
+            ElementRefType::Heap(HeapType::Func) => {
+                while let Some(token) = tokens.peek() {
+                    if *token.ty() == TokenType::Id || *token.ty() == TokenType::Number {
+                        this.init.push(Instruction::create(vec![Operation::RefFunc(
+                            RefFunc::new(Index::parse(tokens)?),
+                        )]));
+                    } else {
+                        break;
+                    }
+                }
+                RefType::FuncRef
+            }
+            ElementRefType::Heap(HeapType::Extern) => {
+                return Err(Error::new(
+                    tokens.next().cloned(),
+                    "Did not expect heap type of 'extern' in elem block".to_string(),
+                ))
+            }
+        };
+
+        if tokens.peek().cloned().expect_right_paren().is_ok() {
+            tokens.next().expect_right_paren()?;
+            return Ok(this);
+        }
+
+        while let Some(keyword) = get_next_keyword(tokens) {
+            match keyword {
+                Keyword::Item | Keyword::Offset => {
+                    tokens.next().expect_left_paren()?;
+                    tokens.next().expect_keyword_token(keyword)?;
+                    if tokens.peek().cloned().expect_left_paren().is_ok() {
+                        this.init.push(Instruction::parse(tokens)?);
+                    } else {
+                        this.init
+                            .push(Instruction::create(vec![Operation::parse(tokens)?]))
+                    }
+                    tokens.next().expect_right_paren()?;
+                }
+                _ => {
+                    tokens.next().expect_left_paren()?;
+                    this.init
+                        .push(Instruction::create(vec![Operation::parse(tokens)?]));
+                    tokens.next().expect_right_paren()?;
+                }
+            }
+        }
+        tokens.next().expect_right_paren()?;
+        Ok(this)
     }
 }

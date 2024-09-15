@@ -15,9 +15,9 @@ use crate::{
 };
 
 use super::types::{
-    DataDefinition, FunctionDefinition, FunctionIndex, FunctionType, GlobalDefinition, GlobalIndex,
-    GlobalType, Index, Limit, MemoryIndex, MemoryOpts, MemoryType, RefType, StartOpts,
-    TableDefinition, TableIndex, TableType, TypeDefinition, TypeIndex, TypeUse, ValueType,
+    DataDefinition, ElementDefinition, FunctionDefinition, FunctionType, GlobalDefinition,
+    GlobalType, Index, Limit, MemoryOpts, MemoryType, OffsetExpr, RefType, StartOpts,
+    TableDefinition, TableType, TableUse, TypeDefinition, TypeIndex, TypeUse, ValueType,
 };
 
 pub enum FnType {
@@ -52,7 +52,7 @@ impl Function {
 }
 
 impl ValidateInstruction for Function {
-    fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
+    fn validate(&self, _: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
         todo!("Alec validate insturction validate call is not implemented")
         // let ty = match &self.ty_index {
         //     FnType::Index(index) => ctx.get_type(*index)?,
@@ -114,8 +114,10 @@ impl ValidateInstruction for Memory {
 }
 
 // Element Mode
+#[derive(Debug, Clone, Default)]
 pub enum ElementMode {
     // Can copy to a table using `table.init`
+    #[default]
     Passive,
     // not available at runtime. Serves to forward-declare references that are
     // formed in code with instructions like `ref.func`
@@ -123,10 +125,16 @@ pub enum ElementMode {
     // Active element copies it's elements into a table.
     Active {
         // the table to use
-        table: TableIndex,
+        table: TableUse,
         // constant express defining an offset into the table
-        offset: Operation,
+        offset: OffsetExpr,
     },
+}
+
+impl std::fmt::Display for ElementMode {
+    fn fmt(&self, _: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!()
+    }
 }
 
 /// Initial contents of a table is uninitialized. Use [Element] to initialize
@@ -154,14 +162,14 @@ impl ValidateInstruction for Element {
         match &self.mode {
             ElementMode::Passive | ElementMode::Declarative => Ok(vec![]),
             ElementMode::Active { table, offset } => {
-                let _ = ctx.get_table(&Index::Index(*table))?;
+                let _ = ctx.get_table(table.index())?;
                 let mut output = offset.validate(ctx, inputs)?;
                 output
                     .pop()
                     .ok_or_else(ValidationError::new)?
                     .try_into_num()?
                     .try_into_i32()?;
-                if output.len() != 0 {
+                if !output.is_empty() {
                     Err(ValidationError::new())
                 } else {
                     Ok(vec![])
@@ -204,14 +212,14 @@ impl ValidateInstruction for Data {
         match &self.mode {
             DataMode::Passive => Ok(vec![]),
             DataMode::Active { memory, offset } => {
-                let _ = ctx.get_memory(Some(&memory))?;
+                let _ = ctx.get_memory(Some(memory))?;
                 let mut output = offset.validate(ctx, inputs)?;
                 output
                     .pop()
                     .ok_or_else(ValidationError::new)?
                     .try_into_num()?
                     .try_into_i32()?;
-                if output.len() != 0 {
+                if !output.is_empty() {
                     Err(ValidationError::new())
                 } else {
                     Ok(vec![])
@@ -328,7 +336,7 @@ impl std::fmt::Display for Export {
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Export {
     fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
         tokens.next().expect_left_paren()?;
-        let keyword = tokens.next().expect_keyword_token(Keyword::Export)?;
+        tokens.next().expect_keyword_token(Keyword::Export)?;
         let name = tokens.next().expect_string()?;
         let description = ExportDescription::parse(tokens)?;
         tokens.next().expect_right_paren()?;
@@ -353,7 +361,7 @@ enum ImportDescriptionType {
 }
 
 impl ValidateInstruction for ImportDescription {
-    fn validate(&self, ctx: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
+    fn validate(&self, _: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
         todo!("help");
         // match self.ty {
         //     ImportDescriptionType::Func(index) => {
@@ -370,7 +378,6 @@ impl ValidateInstruction for ImportDescription {
         //         ctx.get_global(&Index::Index(*index))?.validate(ctx, ())?;
         //     }
         // };
-        Ok(vec![])
     }
 }
 
@@ -470,6 +477,7 @@ pub struct IDCtx {
     funcs: Vec<Option<String>>,
 }
 
+#[derive(Default)]
 pub struct Module {
     id: Option<String>,
 
@@ -491,7 +499,7 @@ pub struct Module {
     globals: Vec<GlobalDefinition>,
 
     // Referenced through [ElementIndex]
-    elements: Vec<Element>,
+    elements: Vec<ElementDefinition>,
 
     // Referenced through [DataIndex]
     datas: Vec<DataDefinition>,
@@ -514,9 +522,9 @@ pub struct Module {
 impl std::fmt::Display for Module {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "(module")?;
-        for func in &self.functions {
+        for ty in &self.types {
             f.pad(&" ".repeat(2))?;
-            writeln!(f, "{}", func)?;
+            writeln!(f, "{}", ty)?;
         }
 
         for import in self.imports.iter() {
@@ -524,39 +532,51 @@ impl std::fmt::Display for Module {
             writeln!(f, "{}", import)?;
         }
 
-        for data in &self.datas {
+        for func in &self.functions {
             f.pad(&" ".repeat(2))?;
-            writeln!(f, "{}", data)?;
+            writeln!(f, "{}", func)?;
+        }
+
+        for table in &self.tables {
+            f.pad(&" ".repeat(2))?;
+            writeln!(f, "{}", table)?;
+        }
+
+        for memory in &self.memories {
+            f.pad(&" ".repeat(2))?;
+            writeln!(f, "{}", memory)?;
+        }
+
+        for global in &self.globals {
+            f.pad(&" ".repeat(2))?;
+            writeln!(f, "{}", global)?;
         }
 
         for export in &self.export {
             f.pad(&" ".repeat(2))?;
             writeln!(f, "{}", export)?;
         }
+
+        if let Some(start) = self.start.as_ref() {
+            f.pad(&" ".repeat(2))?;
+            writeln!(f, "{}", start)?;
+        }
+
+        for elem in &self.elements {
+            f.pad(&" ".repeat(2))?;
+            writeln!(f, "{}", elem)?;
+        }
+
+        for data in &self.datas {
+            f.pad(&" ".repeat(2))?;
+            writeln!(f, "{}", data)?;
+        }
+
         // ending
         f.pad("")?;
         writeln!(f, ")")?;
 
         Ok(())
-    }
-}
-
-impl Default for Module {
-    fn default() -> Self {
-        Self {
-            id: None,
-            id_ctx: Default::default(),
-            types: Vec::new(),
-            functions: Default::default(),
-            tables: Default::default(),
-            memories: Default::default(),
-            globals: Default::default(),
-            elements: Default::default(),
-            datas: Default::default(),
-            imports: Default::default(),
-            export: Default::default(),
-            start: Default::default(),
-        }
     }
 }
 
@@ -599,20 +619,14 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Module {
                 Keyword::Table => this.tables.push(TableDefinition::parse(tokens)?),
                 Keyword::Memory => this.memories.push(MemoryOpts::parse(tokens)?),
                 Keyword::Global => this.globals.push(GlobalDefinition::parse(tokens)?),
-                Keyword::Elem => {
-                    tokens.next().expect_left_paren()?;
-                    tokens.next().expect_keyword_token(Keyword::Elem)?;
-                }
+                Keyword::Elem => this.elements.push(ElementDefinition::parse(tokens)?),
                 Keyword::Data => this.datas.push(DataDefinition::parse(tokens)?),
                 Keyword::Import => this.imports.push(Import::parse(tokens)?),
                 Keyword::Export => this.export.push(Export::parse(tokens)?),
-                Keyword::Start => {
+                Keyword::Start if this.start.is_none() => {
                     // TODO(Alec): This maybe a feature we want for our own modules.
                     // Having multiple start functions just means we'll call them
                     // as we see them.
-                    if this.start.is_some() {
-                        panic!("Only one start function can exist in a module")
-                    }
                     this.start = Some(StartOpts::parse(tokens)?)
                 }
                 keyword => {

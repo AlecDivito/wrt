@@ -8,7 +8,7 @@ use std::{
 use crate::{
     execution::Number,
     structure::{
-        module::Module,
+        module::{get_next_keyword, Module},
         types::{AssertInvalid, AssertMalformed, AssertReturn, NumType},
     },
 };
@@ -28,12 +28,11 @@ pub enum ErrorTy {
     UnexpectedToken,
 }
 
-impl ToString for ErrorTy {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for ErrorTy {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            ErrorTy::UnexpectedToken => "unexpected token",
+            ErrorTy::UnexpectedToken => write!(f, "unexpected token"),
         }
-        .to_string()
     }
 }
 
@@ -42,6 +41,18 @@ pub struct Error {
     ty: ErrorTy,
     token: Option<Token>,
     error: String,
+}
+
+impl std::error::Error for Error {}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Error {:?} on token {:?} with message {}",
+            self.ty, self.token, self.error
+        )
+    }
 }
 
 impl Error {
@@ -66,11 +77,11 @@ impl Error {
     }
 }
 
-impl Into<Error> for ParseError {
-    fn into(self) -> Error {
+impl From<ParseError> for Error {
+    fn from(val: ParseError) -> Self {
         Error::new(
             None,
-            format!("Failed to parse wat tokens. ERROR: {:?}", self),
+            format!("Failed to parse wat tokens. ERROR: {:?}", val),
         )
     }
 }
@@ -205,6 +216,17 @@ impl<'a> Expect<'a> for Option<&'a Token> {
 //    }
 // }
 
+pub fn write_optional<D: std::fmt::Display>(
+    f: &mut Formatter<'_>,
+    prefix: &'static str,
+    opt: Option<&D>,
+) -> std::fmt::Result {
+    match opt {
+        Some(display) => write!(f, "{}{}", prefix, display),
+        None => Ok(()),
+    }
+}
+
 pub fn read_number(expected: NumType, token: &Token) -> Result<Number, Error> {
     Ok(match expected {
         NumType::I32 if token.source.starts_with('-') => token
@@ -226,7 +248,7 @@ pub fn read_number(expected: NumType, token: &Token) -> Result<Number, Error> {
 
 pub fn read_u32(token: &Token) -> Result<u32, Error> {
     let number = if token.source.starts_with("0x") {
-        u32::from_str_radix(token.source.trim_start_matches("0x"), 16)
+        u32::from_str_radix(&token.source.trim_start_matches("0x").replace('_', ""), 16)
             .map_err(|err| Error::new(Some(token.clone()), format!("Error parsing u32: {:?}", err)))
     } else {
         token
@@ -262,6 +284,61 @@ pub fn read_f64(token: &Token) -> Result<f64, Error> {
         .source
         .parse::<f64>()
         .map_err(|err| Error::new(Some(token.clone()), format!("Error parsing f64: {:?}", err)))
+}
+
+pub enum TestBlock {
+    Module(Module),
+    AssertMalformed(AssertMalformed),
+    AssertInvalid(AssertInvalid),
+    AssertReturn(AssertReturn),
+}
+
+pub fn parse_test_block<'a, I: Iterator<Item = &'a Token> + Clone>(
+    peek_iter: &mut Peekable<I>,
+    tokens: &[Token],
+) -> Result<TestBlock, Error> {
+    let result = match get_next_keyword(peek_iter) {
+        Some(Keyword::Module) => Module::parse(peek_iter).map(TestBlock::Module),
+        Some(Keyword::AssertMalformed) => {
+            AssertMalformed::parse(peek_iter).map(TestBlock::AssertMalformed)
+        }
+        Some(Keyword::AssertInvalid) => {
+            AssertInvalid::parse(peek_iter).map(TestBlock::AssertInvalid)
+        }
+        Some(Keyword::AssertReturn) => AssertReturn::parse(peek_iter).map(TestBlock::AssertReturn),
+        keyword => {
+            return Err(Error::new(
+                peek_iter.next().cloned(),
+                format!("{keyword:?} was not expected as a top level directive in .wast files"),
+            ))
+        }
+    };
+    match result {
+        Ok(block) => Ok(block),
+        Err(err) => {
+            let range = if let Some(token) = &err.token() {
+                if let Some(index) = tokens.iter().position(|t| t == *token) {
+                    if index == 0 {
+                        tokens.get(0..=5).unwrap().to_vec()
+                    } else {
+                        tokens.get(index - 2..=index + 2).unwrap().to_vec()
+                    }
+                } else {
+                    vec![]
+                }
+            } else {
+                vec![]
+            };
+
+            println!("ERROR");
+            println!("========================================");
+            println!("{:?}", range);
+            let tokens = range.iter().map(|t| t.source()).collect::<Vec<_>>();
+            println!("Tokens around error: {:?}", tokens);
+            println!("Parsing encounted error {:?}", err);
+            Err(err)
+        }
+    }
 }
 
 pub fn parse_module_test<'a, I: Iterator<Item = &'a Token> + Clone>(

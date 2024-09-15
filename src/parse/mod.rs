@@ -24,6 +24,18 @@ pub struct ParseError {
     tokens: Option<Vec<Token>>,
 }
 
+impl std::error::Error for ParseError {}
+
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Scan Error: {:?} at location {:?}",
+            self.error, self.location
+        )
+    }
+}
+
 impl From<ParseError> for Error {
     fn from(value: ParseError) -> Self {
         ParseError::into(value)
@@ -381,10 +393,12 @@ pub enum Keyword {
 impl Keyword {
     /// Expect no input parameters and one return type that must be of I32.
     pub fn has_unary_return_ty_i32(&self) -> bool {
-        match self {
-            Keyword::Const(NumType::I32) => true,
-            _ => false,
-        }
+        matches!(self, Keyword::Const(NumType::I32))
+    }
+
+    pub fn is_constant(&self) -> bool {
+        use Keyword::*;
+        matches!(self, Const(_) | RefNull | RefFunc | GlobalGet)
     }
 }
 
@@ -522,8 +536,8 @@ impl FromStr for Keyword {
             // Reference
             "ref.null" => RefNull,
             "ref.func" => RefFunc,
-            "ref.extern" => RefExtern,
             "ref.is_null" => RefIsNull,
+            "ref.extern" => RefExtern,
 
             // Number unary
             "i32.clz" => IntClz(IntType::I32),
@@ -1470,7 +1484,7 @@ where
         let column = self.reader.column;
         let mut chars = vec![char];
         while let Some(peek) = self.reader.peek() {
-            if peek.is_ascii_alphanumeric() || ID_CHAR.contains(&peek) {
+            if peek.is_ascii_alphanumeric() || ID_CHAR.contains(peek) {
                 chars.push(*self.reader.pop().unwrap().as_char().unwrap())
             } else {
                 break;
@@ -1490,7 +1504,7 @@ where
     fn read_until_delimiter(&mut self, first: char) -> String {
         let mut tokens = vec![first];
         while let Some(c) = self.reader.peek() {
-            if c.is_ascii_hexdigit() || ALL_NUMBER.contains(&c) {
+            if c.is_ascii_hexdigit() || ALL_NUMBER.contains(c) {
                 tokens.push(self.reader.read().unwrap());
             } else {
                 break;
