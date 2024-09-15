@@ -1671,31 +1671,38 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for MemoryOpts {
 }
 
 pub struct AssertMalformed {
-    wat: String,
+    wat: Vec<String>,
     expected_error: String,
 }
 
 impl AssertMalformed {
     pub fn test(&self) -> Result<(), Error> {
-        let module = format!("(module {})", self.wat);
-        let tokens = tokenize(&module)?;
-        let mut iter = tokens.iter().peekable();
-        match Module::parse(&mut iter) {
-            Ok(_) => Err(Error::new(
-                None,
-                "Module compiled successfully when it was expected to fail",
-            )),
-            Err(err) if err.error_ty() == self.expected_error => Ok(()),
-            Err(err) => Err(Error::new(
-                err.token().cloned(),
-                format!(
-                    "Error '{}' != '{}'. Expected '{}'",
-                    self.expected_error,
-                    err.error_ty(),
-                    err.error()
-                ),
-            )),
+        for wat in self.wat.iter() {
+            let module = format!("(module {})", wat);
+            let tokens = tokenize(&module)?;
+            let mut iter = tokens.iter().peekable();
+            match Module::parse(&mut iter) {
+                Ok(_) => {
+                    return Err(Error::new(
+                        None,
+                        "Module compiled successfully when it was expected to fail",
+                    ))
+                }
+                Err(err) if err.error_ty() == self.expected_error => {}
+                Err(err) => {
+                    return Err(Error::new(
+                        err.token().cloned(),
+                        format!(
+                            "Error '{}' != '{}'. Expected '{}'",
+                            self.expected_error,
+                            err.error_ty(),
+                            err.error()
+                        ),
+                    ))
+                }
+            }
         }
+        Ok(())
     }
 }
 
@@ -1708,7 +1715,10 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for AssertMalformed
         tokens.next().expect_left_paren()?;
         tokens.next().expect_keyword_token(Keyword::Module)?;
         tokens.next().expect_keyword_token(Keyword::Quote)?;
-        let wat = tokens.next().expect_string()?;
+        let mut wat = vec![];
+        while tokens.peek().copied().expect_string().is_ok() {
+            wat.push(tokens.next().expect_string()?);
+        }
         tokens.next().expect_right_paren()?;
         let expected_error = tokens.next().expect_string()?;
         tokens.next().expect_right_paren()?;
