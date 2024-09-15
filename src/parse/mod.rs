@@ -582,7 +582,7 @@ impl FromStr for Keyword {
             "i32.shr_u" => ShiftRightInt { shape: IntType::I32, sign: Unsigned },
             "i32.shr_s" => ShiftRightInt { shape: IntType::I32, sign: Signed },
             "i32.rotl" => RotateInt { shape: IntType::I32, direction: Left },
-            "i32.rotr" => RotateInt { shape: IntType::I32, direction: Rigth },
+            "i32.rotr" => RotateInt { shape: IntType::I32, direction: Right },
             "i64.add" => AddInt(IntType::I64),
             "i64.sub" => SubInt(IntType::I64),
             "i64.mul" => MultiplyInt(IntType::I64),
@@ -597,7 +597,7 @@ impl FromStr for Keyword {
             "i64.shr_u" => ShiftRightInt { shape: IntType::I64, sign: Unsigned },
             "i64.shr_s" => ShiftRightInt { shape: IntType::I64, sign: Signed },
             "i64.rotl" => RotateInt { shape: IntType::I64, direction: Left },
-            "i64.rotr" => RotateInt { shape: IntType::I64, direction: Rigth },
+            "i64.rotr" => RotateInt { shape: IntType::I64, direction: Right },
       
             "f32.add" => AddFloat(FloatType::F32),
             "f32.sub" => SubFloat(FloatType::F32),

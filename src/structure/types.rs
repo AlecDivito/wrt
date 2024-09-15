@@ -25,6 +25,15 @@ pub enum SignType {
     Unsigned,
 }
 
+impl std::fmt::Display for SignType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SignType::Signed => write!(f, "s"),
+            SignType::Unsigned => write!(f, "u"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HalfType {
     Low,
@@ -1007,8 +1016,9 @@ pub type Pointer = i32;
 
 /// Number types are transparent, meaning that their bit patterns can be observed.
 /// Values of number type can be stored in ["Memory"].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum NumType {
+    #[default]
     I32, // servers as Booleans and Memory Addresses
     I64,
     F32,
@@ -1030,6 +1040,14 @@ pub enum IntType {
     #[default]
     I32,
     I64,
+}
+impl From<IntType> for NumType {
+    fn from(value: IntType) -> Self {
+        match value {
+            IntType::I32 => NumType::I32,
+            IntType::I64 => NumType::I64,
+        }
+    }
 }
 impl std::fmt::Display for IntType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1057,7 +1075,7 @@ impl From<FloatType> for NumType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
     Left,
-    Rigth,
+    Right,
 }
 
 impl NumType {

@@ -9,11 +9,12 @@ use crate::{
     structure::{
         module::{get_id, get_next_keyword},
         types::{
-            BlockType, DataIndex, ElementIndex, FloatVectorShape, FuncResult, FunctionIndex,
-            GlobalType, HalfType, HeapType, Index, Instruction, IntType, IntegerVectorShape,
-            LocalIndex, MemoryArgument, MemoryIndex, MemoryLoadNumber, MemoryWidth,
-            MemoryZeroWidth, NumType, RefType, SignType, TableIndex, TypeIndex, ValueType, VecType,
-            VectorMemoryOp, VectorShape,
+            BlockType, DataIndex,
+            Direction::{Left, Right},
+            ElementIndex, FloatVectorShape, FuncResult, FunctionIndex, GlobalType, HalfType,
+            HeapType, Index, Instruction, IntType, IntegerVectorShape, LocalIndex, MemoryArgument,
+            MemoryIndex, MemoryLoadNumber, MemoryWidth, MemoryZeroWidth, NumType, RefType,
+            SignType, TableIndex, TypeIndex, ValueType, VecType, VectorMemoryOp, VectorShape,
         },
     },
 };
@@ -22,7 +23,22 @@ use super::{Context, Input, ValidateInstruction, ValidateResult, ValidationError
 
 #[derive(Clone, Debug)]
 pub enum Operation {
+    // Const
     Const(Const),
+
+    // Unary
+    Test(TestOperation),
+    Unary(UnaryOperation),
+
+    // Binary
+    Binary(BinaryOperation),
+
+    // Compare
+    Compare(CompareOperation),
+
+    // Convert
+    Convert(ConvertOperation),
+
     Nop(NopOperation),
     GlobalGet(GlobalGetOperation),
     LocalGet(LocalGetOperation),
@@ -42,13 +58,6 @@ pub enum Operation {
     BreakTable(BrTableOperation),
     Return(ReturnOperation),
 
-    // Unary
-    Test(TestOperation),
-    Unary(UnaryOperation),
-
-    // Binary
-    Binary(BinaryOperation),
-
     // Reference
     RefNull(RefNull),
     RefIsNull(RefIsNull),
@@ -63,6 +72,11 @@ impl ValidateInstruction for Operation {
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         match self {
             Operation::Const(v) => v.validate(ctx, inputs),
+            Operation::Unary(v) => v.validate(ctx, inputs),
+            Operation::Binary(v) => v.validate(ctx, inputs),
+            Operation::Test(v) => v.validate(ctx, inputs),
+            Operation::Compare(v) => v.validate(ctx, inputs),
+            Operation::Convert(v) => v.validate(ctx, inputs),
             Operation::Nop(v) => v.validate(ctx, inputs),
             Operation::GlobalGet(v) => v.validate(ctx, inputs),
             Operation::LocalGet(v) => v.validate(ctx, inputs),
@@ -77,9 +91,6 @@ impl ValidateInstruction for Operation {
             Operation::BreakIf(v) => v.validate(ctx, inputs),
             Operation::BreakTable(v) => v.validate(ctx, inputs),
             Operation::Return(v) => v.validate(ctx, inputs),
-            Operation::Test(v) => v.validate(ctx, inputs),
-            Operation::Unary(v) => v.validate(ctx, inputs),
-            Operation::Binary(v) => v.validate(ctx, inputs),
             Operation::RefNull(v) => v.validate(ctx, inputs),
             Operation::RefFunc(v) => v.validate(ctx, inputs),
             Operation::RefIsNull(v) => v.validate(ctx, inputs),
@@ -135,6 +146,8 @@ impl std::fmt::Display for Operation {
             Operation::Test(opt) => write!(f, "{}", opt),
             Operation::Unary(opt) => write!(f, "{}", opt),
             Operation::Binary(opt) => write!(f, "{}", opt),
+            Operation::Compare(opt) => write!(f, "{}", opt),
+            Operation::Convert(opt) => write!(f, "{}", opt),
             Operation::RefNull(opt) => write!(f, "{}", opt),
             Operation::RefFunc(opt) => write!(f, "{}", opt),
             Operation::RefIsNull(opt) => write!(f, "{}", opt),
@@ -145,17 +158,17 @@ impl std::fmt::Display for Operation {
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Operation {
     fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
         let op = match tokens.next().expect_keyword()? {
-            Keyword::FuncRef => todo!(),
-            Keyword::ExternRef => todo!(),
+            // Keyword::FuncRef => todo!(),
+            // Keyword::ExternRef => todo!(),
             Keyword::VecShape(_) => todo!(),
-            Keyword::Extern => todo!(),
+            // Keyword::Extern => todo!(),
             Keyword::Mut => todo!(),
             Keyword::Nop => Operation::Nop(NopOperation {}),
             Keyword::Unreachable => Operation::Unreachable(UnreachableOperation {}),
             Keyword::Drop => Operation::Drop(DropOperation {}),
             Keyword::Block => Operation::Block(BlockOperation::parse(tokens)?),
             Keyword::Loop => Operation::Loop(LoopOperation::parse(tokens)?),
-            Keyword::End => todo!(),
+            // Keyword::End => todo!(),
             Keyword::Br => Operation::Break(BrOperation::parse(tokens)?),
             Keyword::BrIf => Operation::BreakIf(BrIfOperation::parse(tokens)?),
             Keyword::BrTable => Operation::BreakTable(BrTableOperation::parse(tokens)?),
@@ -218,10 +231,14 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Operation {
             Keyword::RefFunc => Operation::RefFunc(RefFunc::parse(tokens)?),
             Keyword::RefIsNull => Operation::RefIsNull(RefIsNull),
             Keyword::RefExtern => todo!(),
-            Keyword::IntClz(_) => todo!(),
-            Keyword::IntCtz(_) => todo!(),
-            Keyword::IntPopCnt(_) => todo!(),
-            Keyword::IntExtend8Signed(_) => todo!(),
+            Keyword::IntClz(ty) => Operation::Unary(UnaryOperation::new(ty, UnaryFunction::Clz)),
+            Keyword::IntCtz(ty) => Operation::Unary(UnaryOperation::new(ty, UnaryFunction::Ctz)),
+            Keyword::IntPopCnt(ty) => {
+                Operation::Unary(UnaryOperation::new(ty, UnaryFunction::PopCnt))
+            }
+            Keyword::IntExtend8Signed(_) => {
+                Operation::Convert(ConvertOperation::new(input, output, sign))
+            }
             Keyword::IntExtend16Signed(_) => todo!(),
             Keyword::I64Extend32Signed => todo!(),
 
@@ -246,43 +263,93 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Operation {
             Keyword::TruncateFloat(expected) => {
                 Operation::Unary(UnaryOperation::new(expected, UnaryFunction::Trunc))
             }
-            Keyword::AddInt(expected) => {
-                Operation::Binary(BinaryOperation::new(BinaryFunction::Add(expected)))
+            Keyword::AddInt(ty) => Operation::Binary(BinaryOperation::new(ty, BinaryFunction::Add)),
+            Keyword::SubInt(ty) => Operation::Binary(BinaryOperation::new(ty, BinaryFunction::Sub)),
+            Keyword::MultiplyInt(ty) => {
+                Operation::Binary(BinaryOperation::new(ty, BinaryFunction::Mul))
             }
-            Keyword::SubInt(_) => todo!(),
-            Keyword::MultiplyInt(_) => todo!(),
-            Keyword::AndInt(_) => todo!(),
-            Keyword::OrInt(_) => todo!(),
-            Keyword::XORInt(_) => todo!(),
-            Keyword::ShiftLeftInt(_) => todo!(),
-            Keyword::DivideInt { shape, sign } => todo!(),
-            Keyword::RemainderInt { shape, sign } => todo!(),
-            Keyword::ShiftRightInt { shape, sign } => todo!(),
-            Keyword::RotateInt { shape, direction } => todo!(),
-            Keyword::AddFloat(_) => todo!(),
-            Keyword::SubFloat(_) => todo!(),
-            Keyword::MultiplyFloat(_) => todo!(),
-            Keyword::DivideFloat(_) => todo!(),
-            Keyword::MinFloat(_) => todo!(),
-            Keyword::MaxFloat(_) => todo!(),
-            Keyword::CopySign(_) => todo!(),
+            Keyword::AndInt(ty) => Operation::Binary(BinaryOperation::new(ty, BinaryFunction::And)),
+            Keyword::OrInt(ty) => Operation::Binary(BinaryOperation::new(ty, BinaryFunction::Or)),
+            Keyword::XORInt(ty) => Operation::Binary(BinaryOperation::new(ty, BinaryFunction::Xor)),
+            Keyword::ShiftLeftInt(ty) => {
+                Operation::Binary(BinaryOperation::new(ty, BinaryFunction::Shl))
+            }
+            Keyword::DivideInt { shape, sign } => {
+                Operation::Binary(BinaryOperation::new(shape, BinaryFunction::Div(sign)))
+            }
+            Keyword::RemainderInt { shape, sign } => {
+                Operation::Binary(BinaryOperation::new(shape, BinaryFunction::Rem(sign)))
+            }
+            Keyword::ShiftRightInt { shape, sign } => {
+                Operation::Binary(BinaryOperation::new(shape, BinaryFunction::Shr(sign)))
+            }
+            Keyword::RotateInt { shape, direction } => match direction {
+                Left => Operation::Binary(BinaryOperation::new(shape, BinaryFunction::Rotl)),
+                Right => Operation::Binary(BinaryOperation::new(shape, BinaryFunction::Rotr)),
+            },
+            Keyword::AddFloat(ty) => {
+                Operation::Binary(BinaryOperation::new(ty, BinaryFunction::Add))
+            }
+            Keyword::SubFloat(ty) => {
+                Operation::Binary(BinaryOperation::new(ty, BinaryFunction::Sub))
+            }
+            Keyword::MultiplyFloat(ty) => {
+                Operation::Binary(BinaryOperation::new(ty, BinaryFunction::Mul))
+            }
+            Keyword::DivideFloat(ty) => {
+                Operation::Binary(BinaryOperation::new(ty, BinaryFunction::DivideFloat))
+            }
+            Keyword::MinFloat(ty) => {
+                Operation::Binary(BinaryOperation::new(ty, BinaryFunction::Min))
+            }
+            Keyword::MaxFloat(ty) => {
+                Operation::Binary(BinaryOperation::new(ty, BinaryFunction::Max))
+            }
+            Keyword::CopySign(ty) => {
+                Operation::Binary(BinaryOperation::new(ty, BinaryFunction::CopySign))
+            }
 
             // Testing
             Keyword::I32EqualTest => Operation::Test(TestOperation::new(IntType::I32)),
             Keyword::I64EqualTest => Operation::Test(TestOperation::new(IntType::I64)),
 
-            Keyword::CompareIntEqual(_) => todo!(),
-            Keyword::CompareIntNotEqual(_) => todo!(),
-            Keyword::CompareIntLessThen { shape, sign } => todo!(),
-            Keyword::CompareIntLessOrEqual { shape, sign } => todo!(),
-            Keyword::CompareIntGreaterThen { shape, sign } => todo!(),
-            Keyword::CompareIntGreaterOrEqual { shape, sign } => todo!(),
-            Keyword::CompareFloatEqual(_) => todo!(),
-            Keyword::CompareFloatNotEqual(_) => todo!(),
-            Keyword::CompareFloatLessThen(_) => todo!(),
-            Keyword::CompareFloatLessOrEqual(_) => todo!(),
-            Keyword::CompareFloatGreaterThen(_) => todo!(),
-            Keyword::CompareFloatGreaterOrEqual(_) => todo!(),
+            // Compare
+            Keyword::CompareIntEqual(shape) => {
+                Operation::Compare(CompareOperation::new(shape, CompareFunction::Equal))
+            }
+            Keyword::CompareIntNotEqual(shape) => {
+                Operation::Compare(CompareOperation::new(shape, CompareFunction::NotEqual))
+            }
+            Keyword::CompareIntLessThen { shape, sign } => Operation::Compare(
+                CompareOperation::new(shape, CompareFunction::LessThen(sign)),
+            ),
+            Keyword::CompareIntLessOrEqual { shape, sign } => Operation::Compare(
+                CompareOperation::new(shape, CompareFunction::MoreThen(sign)),
+            ),
+            Keyword::CompareIntGreaterThen { shape, sign } => Operation::Compare(
+                CompareOperation::new(shape, CompareFunction::LessOrEqual(sign)),
+            ),
+            Keyword::CompareIntGreaterOrEqual { shape, sign } => Operation::Compare(
+                CompareOperation::new(shape, CompareFunction::MoreOrEqual(sign)),
+            ),
+            Keyword::CompareFloatEqual(shape) => {
+                Operation::Compare(CompareOperation::new(shape, CompareFunction::Equal))
+            }
+            Keyword::CompareFloatNotEqual(shape) => {
+                Operation::Compare(CompareOperation::new(shape, CompareFunction::NotEqual))
+            }
+            Keyword::CompareFloatLessThen(shape) => {
+                Operation::Compare(CompareOperation::new(shape, CompareFunction::Less))
+            }
+            Keyword::CompareFloatLessOrEqual(shape) => {
+                Operation::Compare(CompareOperation::new(shape, CompareFunction::Greater))
+            }
+            Keyword::CompareFloatGreaterThen(shape) => {
+                Operation::Compare(CompareOperation::new(shape, CompareFunction::LessEqual))
+            }
+            Keyword::CompareFloatGreaterOrEqual(shape) => {
+                Operation::Compare(CompareOperation::new(shape, CompareFunction::GreaterEqual))
+            }
             Keyword::I32WrapI64 => todo!(),
             Keyword::I64ExtendI32(_) => todo!(),
             Keyword::F32DemoteF64 => todo!(),
@@ -544,27 +611,65 @@ impl Execute for UnaryOperation {
 // Validate Binary Operation. Only avaliable for numbers.
 #[derive(Clone, Debug)]
 pub enum BinaryFunction {
-    Add(IntType),
+    // Both
+    Add,
+    Sub,
+    Mul,
+    // Integer
+    Div(SignType),
+    Rem(SignType),
+    And,
+    Or,
+    Xor,
+    Shl,
+    Shr(SignType),
+    Rotl,
+    Rotr,
+    // Float
+    DivideFloat,
+    Min,
+    Max,
+    CopySign,
 }
 impl std::fmt::Display for BinaryFunction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BinaryFunction::Add(ty) => write!(f, "{}.add", ty),
+            BinaryFunction::Add => write!(f, "add"),
+            BinaryFunction::Sub => write!(f, "sub"),
+            BinaryFunction::Mul => write!(f, "mul"),
+            BinaryFunction::Div(sign) => write!(f, "div_{}", sign),
+            BinaryFunction::Rem(sign) => write!(f, "rem_{}", sign),
+            BinaryFunction::And => write!(f, "and"),
+            BinaryFunction::Or => write!(f, "or"),
+            BinaryFunction::Xor => write!(f, "xor"),
+            BinaryFunction::Shl => write!(f, "shl"),
+            BinaryFunction::Shr(sign) => write!(f, "shr_{}", sign),
+            BinaryFunction::Rotl => write!(f, "rotl"),
+            BinaryFunction::Rotr => write!(f, "rotr"),
+            // Float
+            BinaryFunction::DivideFloat => write!(f, "div"),
+            BinaryFunction::Min => write!(f, "min"),
+            BinaryFunction::Max => write!(f, "max"),
+            BinaryFunction::CopySign => write!(f, "copysign"),
         }
     }
 }
 impl Default for BinaryFunction {
     fn default() -> Self {
-        Self::Add(IntType::default())
+        Self::Add
     }
 }
 #[derive(Clone, Default, Debug)]
 pub struct BinaryOperation {
+    ty: NumType,
     func: BinaryFunction,
 }
 impl BinaryOperation {
-    pub fn new(func: BinaryFunction) -> Self {
-        Self { func }
+    pub fn new(ty: impl Into<NumType>, func: BinaryFunction) -> Self {
+        Self {
+            ty: ty.into(),
+            func,
+        }
     }
 }
 impl std::fmt::Display for BinaryOperation {
@@ -611,9 +716,61 @@ impl ValidateInstruction for TestOperation {
     }
 }
 
+// Validate Binary Operation. Only avaliable for numbers.
+#[derive(Clone, Debug, Default)]
+pub enum CompareFunction {
+    // Both
+    #[default]
+    Equal,
+    NotEqual,
+    // Integer
+    LessThen(SignType),
+    MoreThen(SignType),
+    LessOrEqual(SignType),
+    MoreOrEqual(SignType),
+    // Float
+    Less,
+    Greater,
+    LessEqual,
+    GreaterEqual,
+}
+impl std::fmt::Display for CompareFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CompareFunction::Equal => write!(f, "eq"),
+            CompareFunction::NotEqual => write!(f, "ne"),
+            CompareFunction::LessThen(sign) => write!(f, "lt_{}", sign),
+            CompareFunction::MoreThen(sign) => write!(f, "gt_{}", sign),
+            CompareFunction::LessOrEqual(sign) => write!(f, "le_{}", sign),
+            CompareFunction::MoreOrEqual(sign) => write!(f, "ge_{}", sign),
+            CompareFunction::Less => write!(f, "lt"),
+            CompareFunction::Greater => write!(f, "gt"),
+            CompareFunction::LessEqual => write!(f, "le"),
+            CompareFunction::GreaterEqual => write!(f, "ge"),
+        }
+    }
+}
 // Validate relop opertion. Only avalible to numbers
-pub struct RelopOperation;
-impl ValidateInstruction for RelopOperation {
+#[derive(Clone, Debug, Default)]
+pub struct CompareOperation {
+    ty: NumType,
+    func: CompareFunction,
+}
+
+impl CompareOperation {
+    pub fn new(ty: impl Into<NumType>, func: CompareFunction) -> Self {
+        Self {
+            ty: ty.into(),
+            func,
+        }
+    }
+}
+impl std::fmt::Display for CompareOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}", self.ty, self.func)
+    }
+}
+impl ValidateInstruction for CompareOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, _: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         let op1 = inputs.pop()?;
@@ -626,15 +783,24 @@ impl ValidateInstruction for RelopOperation {
     }
 }
 
+pub enum ConvertFunction {
+    Extend { by: MemoryWidth, sign: SignType },
+}
+impl std::fmt::
 // Validate cvt operation. Only avaliable on numbers.
-pub struct CvtOperation {
+pub struct ConvertOperation {
     // This is the number types that is calling this function. Ex. i32 => i32.warp_i64_s
     // i32 is the input
     // i64 is the output
     // s is for signed
     input: NumType,
-    output: NumType,
-    sign: SignType,
+    func: ConvertFunction,
+}
+
+impl ConvertOperation {
+    pub fn new(input: impl Into<NumType>, func: ConvertFunction) -> Self {
+        Self { input, func }
+    }
 }
 impl ValidateInstruction for CvtOperation {
     // type Output = [ValueType; 1];
