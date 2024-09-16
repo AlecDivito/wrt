@@ -1,7 +1,7 @@
-use std::iter::Peekable;
+use std::{convert::TryInto, iter::Peekable};
 
 use crate::{
-    execution::{ModuleInstance, Store, PAGE_SIZE},
+    execution::{ModuleInstance, Number, Store, PAGE_SIZE},
     parse::{
         ast::{read_u32, write_optional, Error, Expect, Parse, TryGet},
         tokenize, Keyword, Token, TokenType,
@@ -278,6 +278,10 @@ pub struct TableType {
 }
 
 impl TableType {
+    pub fn new(limit: Limit, ref_type: RefType) -> Self {
+        Self { limit, ref_type }
+    }
+
     pub fn ref_type(&self) -> &RefType {
         &self.ref_type
     }
@@ -444,6 +448,13 @@ pub struct Limit {
 impl Limit {
     pub fn new(min: u32, max: Option<u32>) -> Self {
         Self { min, max }
+    }
+
+    pub fn static_size(size: u32) -> Self {
+        Self {
+            min: size,
+            max: Some(size),
+        }
     }
 }
 
@@ -1446,10 +1457,50 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for UseMemory {
 }
 
 #[derive(Default, Clone, Debug)]
-pub struct Instruction {
+pub struct InBracketInstruction {
     instructions: Vec<Operation>,
 }
 
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for InBracketInstruction {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        let mut instructions = vec![];
+        // TODO(Alec): This goes for Instruction as well. We only want to be parsing
+        // "plain instructions". Any keyword that is not a plain instruction should
+        // not be parsed and instead return early.
+        while tokens.peek().copied().expect_left_paren().is_ok() {
+            // Break early if this is a block instruction
+            if get_next_keyword(tokens)
+                .map(|f| f.is_block())
+                .unwrap_or(false)
+            {
+                break;
+            }
+            tokens.next().expect_left_paren()?;
+            let op = Operation::parse(tokens)?;
+            // If the instructions are written in S-Expression, process this first
+            while tokens.peek().copied().expect_left_paren().is_ok() {
+                let instr = Instruction::parse(tokens)?;
+                instructions.extend(instr.instructions);
+            }
+            instructions.push(op);
+            tokens.next().expect_right_paren()?;
+        }
+        Ok(Self { instructions })
+    }
+}
+
+impl Into<Instruction> for InBracketInstruction {
+    fn into(self) -> Instruction {
+        Instruction {
+            instructions: self.instructions,
+        }
+    }
+}
+
+#[derive(Default, Clone, Debug)]
+pub struct Instruction {
+    instructions: Vec<Operation>,
+}
 impl std::fmt::Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for instr in self.instructions.iter() {
@@ -1464,15 +1515,19 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Instruction {
         let mut instructions = vec![];
         // TODO(Alec): we need to work on this :( very sad
         loop {
+            println!("{:?}", tokens.peek());
             if tokens.peek().copied().expect_left_paren().is_ok() {
                 tokens.next().expect_left_paren()?;
                 let op = Operation::parse(tokens)?;
+                println!("{:?} {:?}", tokens.peek(), op);
                 while tokens.peek().copied().expect_left_paren().is_ok() {
                     let instr = Instruction::parse(tokens)?;
                     instructions.extend(instr.instructions);
                 }
                 instructions.push(op);
                 tokens.next().expect_right_paren()?;
+            } else if tokens.peek().copied().expect_right_paren().is_ok() {
+                return Ok(Instruction { instructions });
             } else if tokens.peek().copied().expect_right_paren().is_err() {
                 let op = Operation::parse(tokens)?;
                 while tokens.peek().copied().expect_left_paren().is_ok() {
@@ -1480,24 +1535,10 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Instruction {
                     instructions.extend(instr.instructions);
                 }
                 instructions.push(op);
-            } else if tokens.peek().copied().expect_right_paren().is_ok() {
-                return Ok(Instruction { instructions });
             } else {
                 unreachable!()
             }
         }
-
-        // while tokens.peek().copied().expect_left_paren().is_ok() {
-        //     tokens.next().expect_left_paren()?;
-        //     let op = Operation::parse(tokens)?;
-        //     // If the instructions are written in S-Expression, process this first
-        //     while tokens.peek().copied().expect_left_paren().is_ok() {
-        //         let instr = Instruction::parse(tokens)?;
-        //         instructions.extend(instr.instructions);
-        //     }
-        //     instructions.push(op);
-        //     tokens.next().expect_right_paren()?;
-        // }
     }
 }
 impl ValidateInstruction for Instruction {
@@ -1524,8 +1565,16 @@ impl Instruction {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct OffsetExpr(Instruction);
+impl Default for OffsetExpr {
+    fn default() -> Self {
+        Self(Instruction::create(vec![Operation::Const(Const::new(
+            NumType::I32,
+            Number::I32(0),
+        ))]))
+    }
+}
 impl std::fmt::Display for OffsetExpr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "(offset {})", self.0)
@@ -1837,9 +1886,17 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for AssertReturn {
         tokens.next().expect_left_paren()?;
         tokens.next().expect_keyword_token(Keyword::AssertReturn)?;
 
-        // Parse Inoke
+        // Parse Invoke or Get
         tokens.next().expect_left_paren()?;
-        tokens.next().expect_keyword_token(Keyword::Invoke)?;
+        match tokens.peek().cloned().expect_keyword()? {
+            Keyword::Invoke => tokens.next().expect_keyword_token(Keyword::Invoke)?,
+            Keyword::Get => tokens.next().expect_keyword_token(Keyword::Get)?,
+            // TODO(Alec): Understand what the difference between invoke and get
+            // do and also correct handle the error below. It's not handled correctly.
+            _ => tokens.next().expect_keyword_token(Keyword::Invoke)?,
+        }
+
+        let _id = get_id(tokens);
         let function_name = tokens.next().expect_string()?;
 
         let mut variables: Vec<Box<dyn Execute>> = vec![];
@@ -2055,6 +2112,8 @@ pub struct TableDefinition {
     export: Option<RelativeExport>,
     // Global information
     ty: TableType,
+    // Abbreviation
+    elem: Option<ElementDefinition>,
 }
 
 impl std::fmt::Display for TableDefinition {
@@ -2081,7 +2140,58 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for TableDefinition
             _ => {}
         }
 
-        this.ty = TableType::parse(tokens)?;
+        // Handle Abbreviation if we encounter an element
+        if tokens
+            .clone()
+            .nth(2)
+            .expect_keyword_token(Keyword::Elem)
+            .is_ok()
+        {
+            let mut elem = ElementDefinition::default();
+            let ty = RefType::parse(tokens)?;
+            tokens.next().expect_left_paren()?;
+            tokens.next().expect_keyword_token(Keyword::Elem)?;
+            elem.mode = ElementMode::Active {
+                table: TableUse::default(),
+                offset: OffsetExpr::default(),
+            };
+            // TODO(Alec): THis is copied from the ElementDefinition :(
+            if tokens.peek().cloned().try_id().is_some() {
+                while let Some(token) = tokens.peek() {
+                    if *token.ty() == TokenType::Id || *token.ty() == TokenType::Number {
+                        elem.init.push(Instruction::create(vec![Operation::RefFunc(
+                            RefFunc::new(Index::parse(tokens)?),
+                        )]));
+                    } else {
+                        break;
+                    }
+                }
+                tokens.next().expect_right_paren()?;
+                elem.ty = RefType::FuncRef;
+            } else {
+                while get_next_keyword(tokens)
+                    .map(|f| f.is_constant())
+                    .unwrap_or(false)
+                {
+                    tokens.next().expect_left_paren()?;
+                    elem.init
+                        .push(Instruction::create(vec![Operation::parse(tokens)?]));
+                    tokens.next().expect_right_paren()?;
+                }
+            }
+            this.ty = TableType::new(Limit::static_size(elem.init.len().try_into().unwrap()), ty);
+            this.elem = Some(elem);
+        } else {
+            this.ty = TableType::parse(tokens)?;
+        }
+
+        // Handle Table Abbreviation
+        if let Some(Keyword::Elem) = get_next_keyword(tokens) {
+            // Handle inline element
+            let mut elem = ElementDefinition::default();
+            tokens.next().expect_left_paren()?;
+            tokens.next().expect_keyword_token(Keyword::Elem)?;
+        }
 
         // Complete block
         tokens.next().expect_right_paren()?;
@@ -2240,6 +2350,17 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for ElementDefiniti
                 // parse a constant expression.
                 offset: OffsetExpr::parse(tokens)?,
             }
+        } else if get_next_keyword(tokens)
+            .map(|t| t.is_constant())
+            .unwrap_or(false)
+        {
+            ElementMode::Active {
+                table: TableUse::default(),
+                // TODO(Alec): We have similar logic here and at the bottom of this function :(
+                // It would be better to understand offset and item instead and then
+                // parse a constant expression.
+                offset: OffsetExpr::parse(tokens)?,
+            }
         } else if tokens
             .peek()
             .cloned()
@@ -2307,23 +2428,25 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for ElementDefiniti
         }
 
         while let Some(keyword) = get_next_keyword(tokens) {
+            println!("next");
             match keyword {
-                Keyword::Item | Keyword::Offset => {
+                Keyword::Item => {
                     tokens.next().expect_left_paren()?;
-                    tokens.next().expect_keyword_token(keyword)?;
+                    tokens.next().expect_keyword_token(Keyword::Item)?;
+                    println!("{:?}", tokens.peek());
                     if tokens.peek().cloned().expect_left_paren().is_ok() {
-                        this.init.push(Instruction::parse(tokens)?);
+                        this.init.push(InBracketInstruction::parse(tokens)?.into());
                     } else {
                         this.init
-                            .push(Instruction::create(vec![Operation::parse(tokens)?]))
+                            .push(Instruction::create(vec![Operation::parse(tokens)?]));
+                        tokens.next().expect_right_paren()?;
                     }
-                    tokens.next().expect_right_paren()?;
                 }
-                _ => {
-                    tokens.next().expect_left_paren()?;
-                    this.init
-                        .push(Instruction::create(vec![Operation::parse(tokens)?]));
-                    tokens.next().expect_right_paren()?;
+                // keyword if keyword.is_reference() => {
+                keyword => {
+                    println!("{:?} {:?}--", tokens.peek(), keyword);
+                    this.init.push(InBracketInstruction::parse(tokens)?.into());
+                    println!("complete")
                 }
             }
         }

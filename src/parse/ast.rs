@@ -2,6 +2,7 @@ use std::{
     convert::TryInto,
     fmt::{self, Display, Formatter},
     iter::Peekable,
+    num::TryFromIntError,
     string::ParseError,
 };
 
@@ -26,12 +27,14 @@ pub trait Visit: Sized {
 #[derive(Debug)]
 pub enum ErrorTy {
     UnexpectedToken,
+    UnknownNumber,
 }
 
 impl std::fmt::Display for ErrorTy {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             ErrorTy::UnexpectedToken => write!(f, "unexpected token"),
+            ErrorTy::UnknownNumber => write!(f, "unknown number"),
         }
     }
 }
@@ -52,6 +55,16 @@ impl std::fmt::Display for Error {
             "Error {:?} on token {:?} with message {}",
             self.ty, self.token, self.error
         )
+    }
+}
+
+impl From<TryFromIntError> for Error {
+    fn from(value: TryFromIntError) -> Self {
+        Error {
+            ty: ErrorTy::UnknownNumber,
+            token: None,
+            error: format!("{:?}", value),
+        }
     }
 }
 
@@ -227,6 +240,19 @@ pub fn write_optional<D: std::fmt::Display>(
     }
 }
 
+fn read_number_err<In, T: TryInto<In>>(input: T, token: &Token) -> Result<In, Error>
+where
+    T::Error: std::fmt::Debug,
+{
+    match input.try_into() {
+        Ok(b) => Ok(b),
+        Err(err) => Err(Error::new(
+            Some(token.clone()),
+            format!("Failed to convert number with err {:?}", err),
+        )),
+    }
+}
+
 pub fn read_number(expected: NumType, token: &Token) -> Result<Number, Error> {
     Ok(match expected {
         NumType::I32 if token.source.starts_with('-') => token
@@ -239,8 +265,14 @@ pub fn read_number(expected: NumType, token: &Token) -> Result<Number, Error> {
                     format!("Error parsing negative i32: {:?}", err),
                 )
             })?,
-        NumType::I32 => Number::I32(read_u32(token)?.try_into().unwrap()),
-        NumType::I64 => Number::I64(read_u64(token)?.try_into().unwrap()),
+        // I just learnt this, but for some reason, we are supposed to dis-regard
+        // the left most bit. In the test suite there is a i32 of 0x80000000
+        // and the correct representation is supposed to be -0.
+        // REF: https://github.com/rust-lang/rust/issues/108269
+        // NumType::I32 => Number::I32(read_number_err(read_u32(token)?, token)?),
+        // NumType::I64 => Number::I64(read_number_err(read_u64(token)?, token)?),
+        NumType::I32 => Number::I32(read_u32(token)? as i32),
+        NumType::I64 => Number::I64(read_u64(token)? as i64),
         NumType::F32 => Number::F32(read_f32(token)?),
         NumType::F64 => Number::F64(read_f64(token)?),
     })
@@ -273,17 +305,25 @@ pub fn read_u64(token: &Token) -> Result<u64, Error> {
 }
 
 pub fn read_f32(token: &Token) -> Result<f32, Error> {
-    token
-        .source
-        .parse::<f32>()
-        .map_err(|err| Error::new(Some(token.clone()), format!("Error parsing f32: {:?}", err)))
+    if token.source.starts_with("0x") {
+        Ok(f32::from_bits(read_u32(token)?))
+    } else {
+        token
+            .source
+            .parse::<f32>()
+            .map_err(|err| Error::new(Some(token.clone()), format!("Error parsing f32: {:?}", err)))
+    }
 }
 
 pub fn read_f64(token: &Token) -> Result<f64, Error> {
-    token
-        .source
-        .parse::<f64>()
-        .map_err(|err| Error::new(Some(token.clone()), format!("Error parsing f64: {:?}", err)))
+    if token.source.starts_with("0x") {
+        Ok(f64::from_bits(read_u64(token)?))
+    } else {
+        token
+            .source
+            .parse::<f64>()
+            .map_err(|err| Error::new(Some(token.clone()), format!("Error parsing f64: {:?}", err)))
+    }
 }
 
 pub enum TestBlock {

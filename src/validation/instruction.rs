@@ -3,7 +3,7 @@ use std::iter::Peekable;
 use crate::{
     execution::{Number, Stack, Trap},
     parse::{
-        ast::{read_number, read_u32, Error, Expect, Parse},
+        ast::{read_number, read_u32, write_optional, Error, Expect, Parse},
         Keyword, Token,
     },
     structure::{
@@ -12,9 +12,10 @@ use crate::{
             BlockType, DataIndex,
             Direction::{Left, Right},
             ElementIndex, FloatType, FloatVectorShape, FuncResult, FunctionIndex, GlobalType,
-            HalfType, HeapType, Index, Instruction, IntType, IntegerVectorShape, MemoryArgument,
-            MemoryIndex, MemoryLoadNumber, MemoryWidth, MemoryZeroWidth, NumType, RefType,
-            SignType, TableIndex, ValueType, VecType, VectorMemoryOp, VectorShape,
+            HalfType, HeapType, InBracketInstruction, Index, Instruction, IntType,
+            IntegerVectorShape, MemoryArgument, MemoryIndex, MemoryLoadNumber, MemoryWidth,
+            MemoryZeroWidth, NumType, RefType, SignType, TableIndex, TypeUse, ValueType, VecType,
+            VectorMemoryOp, VectorShape,
         },
     },
 };
@@ -1356,13 +1357,18 @@ impl ValidateInstruction for DropOperation {
 pub struct SelectOperation {
     t: Option<ValueType>,
 
-    op1: Box<Operation>,
-    op2: Box<Operation>,
-    op3: Box<Operation>,
+    // Doesn't necessary take arguments, could take operands
+    op1: Option<Box<Operation>>,
+    op2: Option<Box<Operation>>,
+    op3: Option<Box<Operation>>,
 }
 impl std::fmt::Display for SelectOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "(select {} {} {})", self.op1, self.op2, self.op3)
+        write!(f, "(select")?;
+        write_optional(f, " ", self.op1.as_ref())?;
+        write_optional(f, " ", self.op2.as_ref())?;
+        write_optional(f, " ", self.op3.as_ref())?;
+        write!(f, ")")
     }
 }
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for SelectOperation {
@@ -1382,9 +1388,18 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for SelectOperation
             None
         };
 
-        let op1 = Box::new(Operation::parse(tokens)?);
-        let op2 = Box::new(Operation::parse(tokens)?);
-        let op3 = Box::new(Operation::parse(tokens)?);
+        let mut op1 = None;
+        let mut op2 = None;
+        let mut op3 = None;
+        if Operation::parse(&mut tokens.clone()).is_ok() {
+            op1 = Some(Box::new(Operation::parse(tokens)?));
+        }
+        if Operation::parse(&mut tokens.clone()).is_ok() {
+            op2 = Some(Box::new(Operation::parse(tokens)?));
+        }
+        if Operation::parse(&mut tokens.clone()).is_ok() {
+            op3 = Some(Box::new(Operation::parse(tokens)?));
+        }
 
         Ok(Self { t, op1, op2, op3 })
     }
@@ -2220,16 +2235,20 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for IfOperation {
             _ => None,
         };
 
+        println!("{:?}", ty);
+
         let condition = match get_next_keyword(tokens) {
             Some(Keyword::Then) | Some(Keyword::Else) | None => None,
-            Some(_) => Some(Instruction::parse(tokens)?),
+            Some(_) => Some(InBracketInstruction::parse(tokens)?.into()),
         };
+
+        println!("---{:?}", condition);
 
         let mut thens = Instruction::new();
         tokens.next().expect_left_paren()?;
         tokens.next().expect_keyword_token(Keyword::Then)?;
         if !tokens.peek().copied().expect_right_paren().is_ok() {
-            thens = Instruction::parse(tokens)?;
+            thens = InBracketInstruction::parse(tokens)?.into();
         }
         tokens.next().expect_right_paren()?;
 
@@ -2238,7 +2257,7 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for IfOperation {
             tokens.next().expect_left_paren()?;
             tokens.next().expect_keyword_token(Keyword::Else)?;
             if !tokens.peek().copied().expect_right_paren().is_ok() {
-                elses = Some(Instruction::parse(tokens)?);
+                elses = Some(InBracketInstruction::parse(tokens)?.into());
             }
             tokens.next().expect_right_paren()?;
         };
@@ -2479,7 +2498,7 @@ impl ValidateInstruction for CallOperation {
 #[derive(Debug, Clone)]
 pub struct CallIndirectOperation {
     table: Index,
-    ty: Index,
+    ty: TypeUse,
 }
 
 impl std::fmt::Display for CallIndirectOperation {
@@ -2489,8 +2508,11 @@ impl std::fmt::Display for CallIndirectOperation {
 }
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for CallIndirectOperation {
     fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
-        let table = Index::parse(tokens)?;
-        let ty = Index::parse(tokens)?;
+        let table = match Index::parse(&mut tokens.clone()) {
+            Ok(_) => Index::parse(tokens).unwrap(),
+            Err(_) => Index::default(), // 0 index
+        };
+        let ty = TypeUse::parse(tokens)?;
         Ok(Self { table, ty })
     }
 }

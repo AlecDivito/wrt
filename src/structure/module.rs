@@ -612,7 +612,9 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Module {
         this.id = get_id(tokens);
 
         loop {
-            tokens.peek().copied().expect_left_paren()?;
+            if tokens.peek().copied().try_right_paran().is_some() {
+                break;
+            }
             match tokens.clone().nth(1).expect_keyword()? {
                 Keyword::Type => this.types.push(TypeDefinition::parse(tokens)?),
                 Keyword::Func => this.functions.push(FunctionDefinition::parse(tokens)?),
@@ -639,9 +641,6 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Module {
                         ),
                     ));
                 }
-            }
-            if tokens.peek().copied().try_right_paran().is_some() {
-                break;
             }
         }
         tokens.next().expect_right_paren()?;

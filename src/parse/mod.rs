@@ -400,6 +400,16 @@ impl Keyword {
         use Keyword::*;
         matches!(self, Const(_) | RefNull | RefFunc | GlobalGet)
     }
+
+    pub fn is_block(&self) -> bool {
+        use Keyword::*;
+        matches!(self, Block | Loop | If | End | Else | Then)
+    }
+
+    pub fn is_control(&self) -> bool {
+        use Keyword::*;
+        matches!(self, Then | Else | End)
+    }
 }
 
 #[rustfmt::skip]
