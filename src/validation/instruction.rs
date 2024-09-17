@@ -9,13 +9,12 @@ use crate::{
     structure::{
         module::{get_id, get_next_keyword},
         types::{
-            BlockType, DataIndex,
+            BlockType,
             Direction::{Left, Right},
-            ElementIndex, FloatType, FloatVectorShape, FuncResult, FunctionIndex, GlobalType,
-            HalfType, HeapType, InBracketInstruction, Index, Instruction, IntType,
-            IntegerVectorShape, MemoryArgument, MemoryIndex, MemoryLoadNumber, MemoryWidth,
-            MemoryZeroWidth, NumType, RefType, SignType, TableIndex, TypeUse, ValueType, VecType,
-            VectorMemoryOp, VectorShape,
+            FloatType, FloatVectorShape, FuncResult, FunctionIndex, GlobalType, HalfType, HeapType,
+            InBracketInstruction, Index, Instruction, IntType, IntegerVectorShape, MemoryArgument,
+            MemoryIndex, MemoryLoadNumber, MemoryWidth, MemoryZeroWidth, NumType, RefType,
+            SignType, TypeUse, ValueType, VecType, VectorMemoryOp, VectorShape,
         },
     },
 };
@@ -67,6 +66,28 @@ pub enum Operation {
     RefNull(RefNull),
     RefIsNull(RefIsNull),
     RefFunc(RefFunc),
+
+    // Table
+    TableGet(TableGetOperation),
+    TableSet(TableSetOperation),
+    TableSize(TableSizeOperation),
+    TableGrow(TableGrowOperation),
+    TableFill(TableFillOperation),
+    TableCopy(TableCopyOperation),
+    TableInit(TableInitOperation),
+    ElemDrop(ElementDropOperation),
+
+    // Memory
+    MemoryLoad(LoadMemoryOperation),
+    MemoryLoadN(LoadNMemoryOperation),
+    MemoryStore(StoreMemoryOperation),
+    MemoryStoreN(StoreNMemoryOperation),
+    MemorySize(MemorySize),
+    MemoryGrow(MemoryGrow),
+    MemoryFill(MemoryFill),
+    MemoryCopy(MemoryCopy),
+    MemoryInit(MemoryInit),
+    DataDrop(DataDrop),
 }
 impl Default for Operation {
     fn default() -> Self {
@@ -103,6 +124,26 @@ impl ValidateInstruction for Operation {
             Operation::RefNull(v) => v.validate(ctx, inputs),
             Operation::RefFunc(v) => v.validate(ctx, inputs),
             Operation::RefIsNull(v) => v.validate(ctx, inputs),
+            // Table
+            Operation::TableGet(v) => v.validate(ctx, inputs),
+            Operation::TableSet(v) => v.validate(ctx, inputs),
+            Operation::TableSize(v) => v.validate(ctx, inputs),
+            Operation::TableGrow(v) => v.validate(ctx, inputs),
+            Operation::TableFill(v) => v.validate(ctx, inputs),
+            Operation::TableCopy(v) => v.validate(ctx, inputs),
+            Operation::TableInit(v) => v.validate(ctx, inputs),
+            Operation::ElemDrop(v) => v.validate(ctx, inputs),
+            // Memory
+            Operation::MemoryLoad(v) => v.validate(ctx, inputs),
+            Operation::MemoryLoadN(v) => v.validate(ctx, inputs),
+            Operation::MemoryStore(v) => v.validate(ctx, inputs),
+            Operation::MemoryStoreN(v) => v.validate(ctx, inputs),
+            Operation::MemorySize(v) => v.validate(ctx, inputs),
+            Operation::MemoryGrow(v) => v.validate(ctx, inputs),
+            Operation::MemoryFill(v) => v.validate(ctx, inputs),
+            Operation::MemoryCopy(v) => v.validate(ctx, inputs),
+            Operation::MemoryInit(v) => v.validate(ctx, inputs),
+            Operation::DataDrop(v) => v.validate(ctx, inputs),
         }
     }
 }
@@ -137,6 +178,26 @@ impl std::fmt::Display for Operation {
             Operation::RefNull(opt) => write!(f, "{}", opt),
             Operation::RefFunc(opt) => write!(f, "{}", opt),
             Operation::RefIsNull(opt) => write!(f, "{}", opt),
+            // Table
+            Operation::TableGet(opt) => write!(f, "{}", opt),
+            Operation::TableSet(opt) => write!(f, "{}", opt),
+            Operation::TableSize(opt) => write!(f, "{}", opt),
+            Operation::TableGrow(opt) => write!(f, "{}", opt),
+            Operation::TableFill(opt) => write!(f, "{}", opt),
+            Operation::TableCopy(opt) => write!(f, "{}", opt),
+            Operation::TableInit(opt) => write!(f, "{}", opt),
+            Operation::ElemDrop(opt) => write!(f, "{}", opt),
+            // Memory
+            Operation::MemoryLoad(opt) => write!(f, "{}", opt),
+            Operation::MemoryLoadN(opt) => write!(f, "{}", opt),
+            Operation::MemoryStore(opt) => write!(f, "{}", opt),
+            Operation::MemoryStoreN(opt) => write!(f, "{}", opt),
+            Operation::MemorySize(opt) => write!(f, "{}", opt),
+            Operation::MemoryGrow(opt) => write!(f, "{}", opt),
+            Operation::MemoryFill(opt) => write!(f, "{}", opt),
+            Operation::MemoryCopy(opt) => write!(f, "{}", opt),
+            Operation::MemoryInit(opt) => write!(f, "{}", opt),
+            Operation::DataDrop(opt) => write!(f, "{}", opt),
         }
     }
 }
@@ -168,34 +229,37 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Operation {
             Keyword::LocalTee => Operation::LocalTee(LocalTeeOperation::parse(tokens)?),
             Keyword::GlobalGet => Operation::GlobalGet(GlobalGetOperation::parse(tokens)?),
             Keyword::GlobalSet => Operation::GlobalSet(GlobalSetOperation::parse(tokens)?),
-            Keyword::TableGet => todo!(),
-            Keyword::TableSet => todo!(),
-            Keyword::TableSize => todo!(),
-            Keyword::TableGrow => todo!(),
-            Keyword::TableFill => todo!(),
-            Keyword::TableCopy => todo!(),
-            Keyword::TableInit => todo!(),
-            Keyword::ElemDrop => todo!(),
-            Keyword::MemorySize => todo!(),
-            Keyword::MemoryGrow => todo!(),
-            Keyword::MemoryFill => todo!(),
-            Keyword::MemoryCopy => todo!(),
-            Keyword::MemoryInit => todo!(),
-            Keyword::DataDrop => todo!(),
-            Keyword::Load(_) => todo!(),
-            Keyword::Store(_) => todo!(),
-            Keyword::I32Load8(_) => todo!(),
-            Keyword::I32Load16(_) => todo!(),
-            Keyword::I64Load8(_) => todo!(),
-            Keyword::I64Load16(_) => todo!(),
-            Keyword::I64Load32(_) => todo!(),
-            Keyword::I32Store8 => todo!(),
-            Keyword::I32Store16 => todo!(),
-            Keyword::I64Store8 => todo!(),
-            Keyword::I64Store16 => todo!(),
-            Keyword::I64Store32 => todo!(),
-            Keyword::MemArgsAlign(_) => todo!(),
-            Keyword::MemArgsOffset(_) => todo!(),
+            // Table
+            Keyword::TableGet => Operation::TableGet(TableGetOperation::parse(tokens)?),
+            Keyword::TableSet => Operation::TableSet(TableSetOperation::parse(tokens)?),
+            Keyword::TableSize => Operation::TableSize(TableSizeOperation::parse(tokens)?),
+            Keyword::TableGrow => Operation::TableGrow(TableGrowOperation::parse(tokens)?),
+            Keyword::TableFill => Operation::TableFill(TableFillOperation::parse(tokens)?),
+            Keyword::TableCopy => Operation::TableCopy(TableCopyOperation::parse(tokens)?),
+            Keyword::TableInit => Operation::TableInit(TableInitOperation::parse(tokens)?),
+            Keyword::ElemDrop => Operation::ElemDrop(ElementDropOperation::parse(tokens)?),
+            // Memory
+            Keyword::MemorySize => Operation::MemorySize(MemorySize::new()),
+            Keyword::MemoryGrow => Operation::MemoryGrow(MemoryGrow::new()),
+            Keyword::MemoryFill => Operation::MemoryFill(MemoryFill::new()),
+            Keyword::MemoryCopy => Operation::MemoryCopy(MemoryCopy::new()),
+            Keyword::MemoryInit => Operation::MemoryInit(MemoryInit::parse(tokens)?),
+            Keyword::DataDrop => Operation::DataDrop(DataDrop::parse(tokens)?),
+            Keyword::Load(ty) => {
+                Operation::MemoryLoad(LoadMemoryOperation::new(ty, MemoryArgument::parse(tokens)?))
+            }
+            Keyword::Store(ty) => Operation::MemoryStore(StoreMemoryOperation::new(
+                ty,
+                MemoryArgument::parse(tokens)?,
+            )),
+            Keyword::LoadN(ty, sign, num) => Operation::MemoryLoadN(LoadNMemoryOperation::new(
+                ty,
+                num,
+                sign,
+                MemoryArgument::parse(tokens)?,
+            )),
+            // Keyword::MemArgsAlign(_) => todo!(),
+            // Keyword::MemArgsOffset(_) => todo!(),
             // Keyword::Declare => todo!(),
             // Keyword::Offset => todo!(),
             // Keyword::Item => todo!(),
@@ -1520,8 +1584,9 @@ impl std::fmt::Display for GlobalGetOperation {
 }
 impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for GlobalGetOperation {
     fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
-        let index = Index::Index(read_u32(tokens.next().expect_number()?)?);
-        Ok(Self { index })
+        Ok(Self {
+            index: Index::parse(tokens)?,
+        })
     }
 }
 impl ValidateInstruction for GlobalGetOperation {
@@ -1565,25 +1630,51 @@ impl ValidateInstruction for GlobalSetOperation {
 /**
  * Table Instructions
  */
+#[derive(Clone, Debug)]
 pub struct TableGetOperation {
-    index: TableIndex,
+    index: Index,
+}
+impl std::fmt::Display for TableGetOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(table.get {})", self.index)
+    }
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for TableGetOperation {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        Ok(Self {
+            index: Index::parse(tokens)?,
+        })
+    }
 }
 impl ValidateInstruction for TableGetOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let table = ctx.get_table(&Index::Index(self.index))?;
+        let table = ctx.get_table(&self.index)?;
         inputs.pop()?.try_into_num()?.try_into_i32()?;
         Ok(vec![ValueType::RefType(*table.ref_type())])
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct TableSetOperation {
-    index: TableIndex,
+    index: Index,
+}
+impl std::fmt::Display for TableSetOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(table.set {})", self.index)
+    }
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for TableSetOperation {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        Ok(Self {
+            index: Index::parse(tokens)?,
+        })
+    }
 }
 impl ValidateInstruction for TableSetOperation {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let table = ctx.get_table(&Index::Index(self.index))?;
+        let table = ctx.get_table(&self.index)?;
         let _tb_set_value = inputs.pop()?.try_into_ref_type()?;
         let _tbl_index = inputs.pop()?.try_into_num()?.try_into_i32()?;
         if _tb_set_value == *table.ref_type() {
@@ -1594,24 +1685,50 @@ impl ValidateInstruction for TableSetOperation {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct TableSizeOperation {
-    index: TableIndex,
+    index: Index,
+}
+impl std::fmt::Display for TableSizeOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(table.size {})", self.index)
+    }
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for TableSizeOperation {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        Ok(Self {
+            index: Index::parse(tokens)?,
+        })
+    }
 }
 impl ValidateInstruction for TableSizeOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let _table = ctx.get_table(&Index::Index(self.index))?;
+        let _table = ctx.get_table(&self.index)?;
         Ok(vec![ValueType::Num(NumType::I32)])
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct TableGrowOperation {
-    index: TableIndex,
+    index: Index,
+}
+impl std::fmt::Display for TableGrowOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(table.grow {})", self.index)
+    }
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for TableGrowOperation {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        Ok(Self {
+            index: Index::parse(tokens)?,
+        })
+    }
 }
 impl ValidateInstruction for TableGrowOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let table = ctx.get_table(&Index::Index(self.index))?;
+        let table = ctx.get_table(&self.index)?;
 
         let _tbl_index = inputs.pop()?.try_into_num()?.try_into_i32()?;
         let _tb_set_value = inputs.pop()?.try_into_ref_type()?;
@@ -1624,13 +1741,26 @@ impl ValidateInstruction for TableGrowOperation {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct TableFillOperation {
-    index: TableIndex,
+    index: Index,
+}
+impl std::fmt::Display for TableFillOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(table.fill {})", self.index)
+    }
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for TableFillOperation {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        Ok(Self {
+            index: Index::parse(tokens)?,
+        })
+    }
 }
 impl ValidateInstruction for TableFillOperation {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let table = ctx.get_table(&Index::Index(self.index))?;
+        let table = ctx.get_table(&self.index)?;
 
         let _tbl_from = inputs.pop()?.try_into_num()?.try_into_i32()?;
         let _tb_set_value = inputs.pop()?.try_into_ref_type()?;
@@ -1644,15 +1774,33 @@ impl ValidateInstruction for TableFillOperation {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct TableCopyOperation {
-    table_x_index: TableIndex,
-    table_y_index: TableIndex,
+    table_x_index: Index,
+    table_y_index: Index,
+}
+impl std::fmt::Display for TableCopyOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "(table.copy {} {})",
+            self.table_x_index, self.table_y_index
+        )
+    }
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for TableCopyOperation {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        Ok(Self {
+            table_x_index: Index::parse(tokens)?,
+            table_y_index: Index::parse(tokens)?,
+        })
+    }
 }
 impl ValidateInstruction for TableCopyOperation {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let table_x = ctx.get_table(&Index::Index(self.table_x_index))?;
-        let table_y = ctx.get_table(&Index::Index(self.table_y_index))?;
+        let table_x = ctx.get_table(&self.table_x_index)?;
+        let table_y = ctx.get_table(&self.table_y_index)?;
         if table_x.ref_type() == table_y.ref_type() {
             inputs.pop()?.try_into_num()?.try_into_i32()?;
             inputs.pop()?.try_into_num()?.try_into_i32()?;
@@ -1664,15 +1812,29 @@ impl ValidateInstruction for TableCopyOperation {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct TableInitOperation {
-    table: TableIndex,
-    element: ElementIndex,
+    table: Index,
+    element: Index,
+}
+impl std::fmt::Display for TableInitOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(table.init {} {})", self.table, self.element)
+    }
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for TableInitOperation {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        Ok(Self {
+            table: Index::parse(tokens)?,
+            element: Index::parse(tokens)?,
+        })
+    }
 }
 impl ValidateInstruction for TableInitOperation {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let table = ctx.get_table(&Index::Index(self.table))?;
-        let element = ctx.get_element(&Index::Index(self.element))?;
+        let table = ctx.get_table(&self.table)?;
+        let element = ctx.get_element(&self.element)?;
         if *table.ref_type() == *element {
             inputs.pop()?.try_into_num()?.try_into_i32()?;
             inputs.pop()?.try_into_num()?.try_into_i32()?;
@@ -1684,13 +1846,26 @@ impl ValidateInstruction for TableInitOperation {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct ElementDropOperation {
-    element: ElementIndex,
+    element: Index,
+}
+impl std::fmt::Display for ElementDropOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(elem.drop {})", self.element)
+    }
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for ElementDropOperation {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        Ok(Self {
+            element: Index::parse(tokens)?,
+        })
+    }
 }
 impl ValidateInstruction for ElementDropOperation {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, _inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        ctx.get_element(&Index::Index(self.element))?;
+        ctx.get_element(&self.element)?;
         Ok(vec![])
     }
 }
@@ -1699,12 +1874,27 @@ impl ValidateInstruction for ElementDropOperation {
  * Memory Instructions
  */
 // (t).load memarg
+#[derive(Debug, Clone)]
 pub struct LoadMemoryOperation {
     ty: NumType,
     // This is more for me, 99% of the time this is supposed to be None, as described
     // in the spec.
     memory: Option<MemoryIndex>,
     args: MemoryArgument,
+}
+impl LoadMemoryOperation {
+    pub fn new(ty: NumType, args: MemoryArgument) -> Self {
+        Self {
+            ty,
+            args,
+            memory: None,
+        }
+    }
+}
+impl std::fmt::Display for LoadMemoryOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}.load {})", self.ty, self.args)
+    }
 }
 impl ValidateInstruction for LoadMemoryOperation {
     // type Output = [ValueType; 1];
@@ -1723,14 +1913,40 @@ impl ValidateInstruction for LoadMemoryOperation {
 
 // (t).load(N)_(Sign) memarg
 // N => 8, 16, 32
+#[derive(Clone, Debug)]
 pub struct LoadNMemoryOperation {
-    ty: NumType,
+    ty: IntType,
     // This is more for me, 99% of the time this is supposed to be None, as described
     // in the spec.
     memory: Option<MemoryIndex>,
     load_n: MemoryLoadNumber,
-    _sign: SignType,
+    sign: SignType,
     args: MemoryArgument,
+}
+impl LoadNMemoryOperation {
+    pub fn new(
+        ty: IntType,
+        load_n: MemoryLoadNumber,
+        sign: SignType,
+        args: MemoryArgument,
+    ) -> Self {
+        Self {
+            ty,
+            load_n,
+            sign,
+            args,
+            memory: None,
+        }
+    }
+}
+impl std::fmt::Display for LoadNMemoryOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "({}.load{}_{} {})",
+            self.ty, self.load_n, self.sign, self.args
+        )
+    }
 }
 impl ValidateInstruction for LoadNMemoryOperation {
     // type Output = [ValueType; 1];
@@ -1740,7 +1956,7 @@ impl ValidateInstruction for LoadNMemoryOperation {
         let alignment = 2_u32.pow(self.args.align());
         if alignment <= (bit_width / 8) {
             inputs.pop()?.try_into_num()?.try_into_i32()?;
-            Ok(vec![ValueType::Num(self.ty.clone())])
+            Ok(vec![ValueType::from(self.ty)])
         } else {
             Err(ValidationError::new())
         }
@@ -1748,12 +1964,27 @@ impl ValidateInstruction for LoadNMemoryOperation {
 }
 
 // (t).store memarg
+#[derive(Clone, Debug)]
 pub struct StoreMemoryOperation {
     ty: NumType,
     // This is more for me, 99% of the time this is supposed to be None, as described
     // in the spec.
     memory: Option<MemoryIndex>,
     args: MemoryArgument,
+}
+impl StoreMemoryOperation {
+    pub fn new(ty: NumType, args: MemoryArgument) -> Self {
+        Self {
+            ty,
+            args,
+            memory: None,
+        }
+    }
+}
+impl std::fmt::Display for StoreMemoryOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}.store {})", self.ty, self.args)
+    }
 }
 impl ValidateInstruction for StoreMemoryOperation {
     // type Output = [ValueType; 0];
@@ -1773,6 +2004,7 @@ impl ValidateInstruction for StoreMemoryOperation {
 
 // (t).store(N) memarg
 // N => 8, 16, 32
+#[derive(Clone, Debug)]
 pub struct StoreNMemoryOperation {
     ty: NumType,
     // This is more for me, 99% of the time this is supposed to be None, as described
@@ -1780,6 +2012,21 @@ pub struct StoreNMemoryOperation {
     memory: Option<MemoryIndex>,
     load_n: MemoryLoadNumber,
     args: MemoryArgument,
+}
+impl StoreNMemoryOperation {
+    pub fn new(ty: NumType, load_n: MemoryLoadNumber, args: MemoryArgument) -> Self {
+        Self {
+            ty,
+            args,
+            load_n,
+            memory: None,
+        }
+    }
+}
+impl std::fmt::Display for StoreNMemoryOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}.store{} {})", self.ty, self.load_n, self.args)
+    }
 }
 impl ValidateInstruction for StoreNMemoryOperation {
     // type Output = [ValueType; 0];
@@ -1799,6 +2046,7 @@ impl ValidateInstruction for StoreNMemoryOperation {
 
 // v128.load(NxM)_(sx) memarg
 // NxM => 8x8, 16x4, 32x2
+#[derive(Clone, Debug)]
 pub struct VectorLoadMemoryOperation {
     // This is more for me, 99% of the time this is supposed to be None, as described
     // in the spec.
@@ -1824,6 +2072,7 @@ impl ValidateInstruction for VectorLoadMemoryOperation {
 
 // v128.load(N)_splat memarg
 // N => 8, 16, 32, 64
+#[derive(Clone, Debug)]
 pub struct VectorLoadNSplatMemoryOperation {
     // This is more for me, 99% of the time this is supposed to be None, as described
     // in the spec.
@@ -1849,6 +2098,7 @@ impl ValidateInstruction for VectorLoadNSplatMemoryOperation {
 
 // v128.load(N)_zero memarg
 // N => 32, 64
+#[derive(Clone, Debug)]
 pub struct VectorLoadNZeroMemoryOperation {
     // This is more for me, 99% of the time this is supposed to be None, as described
     // in the spec.
@@ -1874,22 +2124,23 @@ impl ValidateInstruction for VectorLoadNZeroMemoryOperation {
 
 // v128.load(N)_lane memarg laneidx
 // N => 8, 16, 32, 64
+#[derive(Clone, Debug)]
 pub struct VectorLoadNLaneMemoryOperation {
     // This is more for me, 99% of the time this is supposed to be None, as described
     // in the spec.
-    memory: Option<MemoryIndex>,
+    memory: Option<Index>,
     width_n: MemoryWidth,
-    index: LaneIndex,
+    index: Index,
     args: MemoryArgument,
 }
 impl ValidateInstruction for VectorLoadNLaneMemoryOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        if !self.index.validate_against_memory_width(&self.width_n) {
-            return Err(ValidationError::new());
-        }
+        // if !self.index.validate_against_memory_width(&self.width_n) {
+        //     return Err(ValidationError::new());
+        // }
 
-        let _memory = ctx.get_memory(self.memory.map(Index::Index).as_ref())?;
+        let _memory = ctx.get_memory(self.memory.as_ref())?;
         let bit_width = self.width_n.bit_width();
         let alignment = 2_u32.pow(self.args.align());
 
@@ -1905,22 +2156,23 @@ impl ValidateInstruction for VectorLoadNLaneMemoryOperation {
 
 // v128.store(N)_lane memarg laneidx
 // N => 8, 16, 32, 64
+#[derive(Clone, Debug)]
 pub struct VectorStoreNLaneMemoryOperation {
     // This is more for me, 99% of the time this is supposed to be None, as described
     // in the spec.
-    memory: Option<MemoryIndex>,
+    memory: Option<Index>,
     width_n: MemoryWidth,
-    index: LaneIndex,
+    index: Index,
     args: MemoryArgument,
 }
 impl ValidateInstruction for VectorStoreNLaneMemoryOperation {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        if !self.index.validate_against_memory_width(&self.width_n) {
-            return Err(ValidationError::new());
-        }
+        // if !self.index.validate_against_memory_width(&self.width_n) {
+        //     return Err(ValidationError::new());
+        // }
 
-        let _memory = ctx.get_memory(self.memory.map(Index::Index).as_ref())?;
+        let _memory = ctx.get_memory(self.memory.as_ref())?;
         let bit_width = self.width_n.bit_width();
         let alignment = 2_u32.pow(self.args.align());
 
@@ -1934,30 +2186,63 @@ impl ValidateInstruction for VectorStoreNLaneMemoryOperation {
     }
 }
 
-pub struct MemorySize(Option<MemoryIndex>);
+#[derive(Debug, Clone)]
+pub struct MemorySize(Option<Index>);
+impl MemorySize {
+    pub fn new() -> Self {
+        Self(None)
+    }
+}
+impl std::fmt::Display for MemorySize {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(memory.size)")
+    }
+}
 impl ValidateInstruction for MemorySize {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, _inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let _ = ctx.get_memory(self.0.map(Index::Index).as_ref())?;
+        let _ = ctx.get_memory(self.0.as_ref())?;
         Ok(vec![ValueType::Num(NumType::I32)])
     }
 }
 
-pub struct MemoryGrow(Option<MemoryIndex>);
+#[derive(Clone, Debug)]
+pub struct MemoryGrow(Option<Index>);
+impl MemoryGrow {
+    pub fn new() -> Self {
+        Self(None)
+    }
+}
+impl std::fmt::Display for MemoryGrow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(memory.grow)")
+    }
+}
 impl ValidateInstruction for MemoryGrow {
     // type Output = [ValueType; 1];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let _ = ctx.get_memory(self.0.map(Index::Index).as_ref())?;
+        let _ = ctx.get_memory(self.0.as_ref())?;
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
         Ok(vec![ValueType::Num(NumType::I32)])
     }
 }
 
-pub struct MemoryFill(Option<MemoryIndex>);
+#[derive(Clone, Debug)]
+pub struct MemoryFill(Option<Index>);
+impl MemoryFill {
+    pub fn new() -> Self {
+        Self(None)
+    }
+}
+impl std::fmt::Display for MemoryFill {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(memory.fill)")
+    }
+}
 impl ValidateInstruction for MemoryFill {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let _ = ctx.get_memory(self.0.map(Index::Index).as_ref())?;
+        let _ = ctx.get_memory(self.0.as_ref())?;
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
@@ -1965,7 +2250,18 @@ impl ValidateInstruction for MemoryFill {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct MemoryCopy(Option<MemoryIndex>);
+impl MemoryCopy {
+    pub fn new() -> Self {
+        Self(None)
+    }
+}
+impl std::fmt::Display for MemoryCopy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(memory.copy)")
+    }
+}
 impl ValidateInstruction for MemoryCopy {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
@@ -1977,15 +2273,37 @@ impl ValidateInstruction for MemoryCopy {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct MemoryInit {
     memory: Option<MemoryIndex>,
-    data: DataIndex,
+    data: Index,
+}
+impl MemoryInit {
+    pub fn new(index: Index) -> Self {
+        Self {
+            data: index,
+            memory: None,
+        }
+    }
+}
+impl std::fmt::Display for MemoryInit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(memory.init {})", self.data)
+    }
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for MemoryInit {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        Ok(Self {
+            memory: None,
+            data: Index::parse(tokens)?,
+        })
+    }
 }
 impl ValidateInstruction for MemoryInit {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         let _ = ctx.get_memory(self.memory.map(Index::Index).as_ref())?;
-        let _ = ctx.get_data(&Index::Index(self.data))?;
+        let _ = ctx.get_data(&self.data)?;
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
         let _ = inputs.pop()?.try_into_num()?.try_into_i32()?;
@@ -1993,13 +2311,26 @@ impl ValidateInstruction for MemoryInit {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct DataDrop {
-    data: DataIndex,
+    data: Index,
+}
+impl std::fmt::Display for DataDrop {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(data.drop {})", self.data)
+    }
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for DataDrop {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        Ok(Self {
+            data: Index::parse(tokens)?,
+        })
+    }
 }
 impl ValidateInstruction for DataDrop {
     // type Output = [ValueType; 0];
     fn validate(&self, ctx: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
-        let _ = ctx.get_data(&Index::Index(self.data))?;
+        let _ = ctx.get_data(&self.data)?;
         Ok(vec![])
     }
 }
@@ -2235,14 +2566,14 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for IfOperation {
             _ => None,
         };
 
-        println!("{:?}", ty);
+        // println!("{:?}", ty);
 
         let condition = match get_next_keyword(tokens) {
             Some(Keyword::Then) | Some(Keyword::Else) | None => None,
             Some(_) => Some(InBracketInstruction::parse(tokens)?.into()),
         };
 
-        println!("---{:?}", condition);
+        // println!("---{:?}", condition);
 
         let mut thens = Instruction::new();
         tokens.next().expect_left_paren()?;

@@ -10,7 +10,7 @@ use crate::{
     execution::Number,
     structure::{
         module::{get_next_keyword, Module},
-        types::{AssertInvalid, AssertMalformed, AssertReturn, NumType},
+        types::{AssertInvalid, AssertMalformed, AssertReturn, AssertTrap, NumType},
     },
 };
 
@@ -255,22 +255,18 @@ where
 
 pub fn read_number(expected: NumType, token: &Token) -> Result<Number, Error> {
     Ok(match expected {
-        NumType::I32 if token.source.starts_with('-') => token
-            .source
-            .parse::<i32>()
-            .map(Number::I32)
-            .map_err(|err| {
-                Error::new(
-                    Some(token.clone()),
-                    format!("Error parsing negative i32: {:?}", err),
-                )
-            })?,
         // I just learnt this, but for some reason, we are supposed to dis-regard
         // the left most bit. In the test suite there is a i32 of 0x80000000
         // and the correct representation is supposed to be -0.
         // REF: https://github.com/rust-lang/rust/issues/108269
         // NumType::I32 => Number::I32(read_number_err(read_u32(token)?, token)?),
         // NumType::I64 => Number::I64(read_number_err(read_u64(token)?, token)?),
+        NumType::I32 if token.source.starts_with('-') => {
+            Number::I32((read_u32(token)? as i32).wrapping_neg())
+        }
+        NumType::I64 if token.source.starts_with('-') => {
+            Number::I64((read_u64(token)? as i64).wrapping_neg())
+        }
         NumType::I32 => Number::I32(read_u32(token)? as i32),
         NumType::I64 => Number::I64(read_u64(token)? as i64),
         NumType::F32 => Number::F32(read_f32(token)?),
@@ -279,12 +275,24 @@ pub fn read_number(expected: NumType, token: &Token) -> Result<Number, Error> {
 }
 
 pub fn read_u32(token: &Token) -> Result<u32, Error> {
-    let number = if token.source.starts_with("0x") {
-        u32::from_str_radix(&token.source.trim_start_matches("0x").replace('_', ""), 16)
+    let source = &token.source;
+    let s = if source.starts_with('-') {
+        &source[1..]
+    } else {
+        &source[..]
+    };
+    let number = if s.starts_with("0x") {
+        let to_parse = s
+            .trim_start_matches("0x")
+            .trim_start_matches('0')
+            .replace('_', "");
+        if to_parse.is_empty() {
+            return Ok(0);
+        }
+        u32::from_str_radix(&to_parse, 16)
             .map_err(|err| Error::new(Some(token.clone()), format!("Error parsing u32: {:?}", err)))
     } else {
-        token
-            .source
+        s.replace('_', "")
             .parse::<u32>()
             .map_err(|err| Error::new(Some(token.clone()), format!("Error parsing u32: {:?}", err)))
     }?;
@@ -292,12 +300,24 @@ pub fn read_u32(token: &Token) -> Result<u32, Error> {
 }
 
 pub fn read_u64(token: &Token) -> Result<u64, Error> {
-    let number = if token.source.starts_with("0x") {
-        u64::from_str_radix(token.source.trim_start_matches("0x"), 16)
+    let source = &token.source;
+    let s = if source.starts_with('-') {
+        &source[1..]
+    } else {
+        &source[..]
+    };
+    let number = if s.starts_with("0x") {
+        let to_parse = s
+            .trim_start_matches("0x")
+            .trim_start_matches('0')
+            .replace('_', "");
+        if to_parse.is_empty() {
+            return Ok(0);
+        }
+        u64::from_str_radix(&to_parse, 16)
             .map_err(|err| Error::new(Some(token.clone()), format!("Error parsing u64: {:?}", err)))
     } else {
-        token
-            .source
+        s.replace('_', "")
             .parse::<u64>()
             .map_err(|err| Error::new(Some(token.clone()), format!("Error parsing u64: {:?}", err)))
     }?;
@@ -331,6 +351,7 @@ pub enum TestBlock {
     AssertMalformed(AssertMalformed),
     AssertInvalid(AssertInvalid),
     AssertReturn(AssertReturn),
+    AssertTrap(AssertTrap),
 }
 
 pub fn parse_test_block<'a, I: Iterator<Item = &'a Token> + Clone>(
@@ -346,6 +367,7 @@ pub fn parse_test_block<'a, I: Iterator<Item = &'a Token> + Clone>(
             AssertInvalid::parse(peek_iter).map(TestBlock::AssertInvalid)
         }
         Some(Keyword::AssertReturn) => AssertReturn::parse(peek_iter).map(TestBlock::AssertReturn),
+        Some(Keyword::AssertTrap) => AssertTrap::parse(peek_iter).map(TestBlock::AssertTrap),
         keyword => {
             return Err(Error::new(
                 peek_iter.next().cloned(),
@@ -376,6 +398,7 @@ pub fn parse_test_block<'a, I: Iterator<Item = &'a Token> + Clone>(
             let tokens = range.iter().map(|t| t.source()).collect::<Vec<_>>();
             println!("Tokens around error: {:?}", tokens);
             println!("Parsing encounted error {:?}", err);
+            println!("========================================");
             Err(err)
         }
     }

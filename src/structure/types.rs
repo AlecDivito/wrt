@@ -320,12 +320,21 @@ impl Validation<TableType> for TableType {
     }
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum MemoryLoadNumber {
     Load8,
     Load16,
     Load32,
 }
-
+impl std::fmt::Display for MemoryLoadNumber {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MemoryLoadNumber::Load8 => write!(f, "8"),
+            MemoryLoadNumber::Load16 => write!(f, "16"),
+            MemoryLoadNumber::Load32 => write!(f, "32"),
+        }
+    }
+}
 impl MemoryLoadNumber {
     pub fn bit_width(&self) -> u32 {
         match self {
@@ -381,14 +390,34 @@ impl MemoryZeroWidth {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct MemoryArgument {
     offset: u32,
-    align: u32,
+    align: Option<u32>,
 }
-
+impl std::fmt::Display for MemoryArgument {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {:?}", self.offset, self.align)
+    }
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for MemoryArgument {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        let offset = if tokens.peek().copied().expect_number().is_ok() {
+            read_u32(tokens.next().expect_number()?)?
+        } else {
+            0
+        };
+        let align = if tokens.peek().copied().expect_number().is_ok() {
+            Some(read_u32(tokens.next().expect_number()?)?)
+        } else {
+            None
+        };
+        Ok(Self { offset, align })
+    }
+}
 impl MemoryArgument {
     pub fn align(&self) -> u32 {
-        self.align
+        self.align.unwrap()
     }
 
     pub fn offset(&self) -> u32 {
@@ -778,6 +807,11 @@ impl std::fmt::Display for ValueType {
         }
     }
 }
+impl From<IntType> for ValueType {
+    fn from(value: IntType) -> Self {
+        Self::Num(value.into())
+    }
+}
 impl Default for ValueType {
     fn default() -> Self {
         Self::RefType(RefType::default())
@@ -996,7 +1030,7 @@ impl std::fmt::Display for VecType {
 }
 // TODO(Alec): Implement all the permutations of VecType. Because the value
 // is "transparent"
-
+#[derive(Clone, Debug)]
 pub enum VectorMemoryOp {
     I8x8,
     I16x4,
@@ -1515,11 +1549,11 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Instruction {
         let mut instructions = vec![];
         // TODO(Alec): we need to work on this :( very sad
         loop {
-            println!("{:?}", tokens.peek());
+            // println!("{:?}", tokens.peek());
             if tokens.peek().copied().expect_left_paren().is_ok() {
                 tokens.next().expect_left_paren()?;
                 let op = Operation::parse(tokens)?;
-                println!("{:?} {:?}", tokens.peek(), op);
+                // println!("{:?} {:?}", tokens.peek(), op);
                 while tokens.peek().copied().expect_left_paren().is_ok() {
                     let instr = Instruction::parse(tokens)?;
                     instructions.extend(instr.instructions);
@@ -1914,6 +1948,78 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for AssertReturn {
             expected.push(Box::new(Const::parse(tokens)?));
             tokens.next().expect_right_paren()?;
         }
+
+        tokens.next().expect_right_paren()?;
+        Ok(Self {
+            function_name,
+            variables,
+            expected,
+        })
+    }
+}
+
+pub struct AssertTrap {
+    function_name: String,
+    variables: Vec<Box<dyn Execute>>,
+    expected: String,
+}
+
+impl AssertTrap {
+    pub fn test(&self, module: &Module) -> Result<(), Error> {
+        // store is global state
+        let mut store = Store::default();
+
+        // instance is
+        let instance = ModuleInstance::new(&mut store, module).expect("success");
+
+        todo!("ahahahaha, i should never reach this yet :P");
+        // match module.call(&mut ctx, &mut input) {
+        //     Ok(_) => Err(Error::new(
+        //         None,
+        //         "Module validated successfully when it was expected to fail",
+        //     )),
+        //     Err(err) if err.error_ty() == self.expected_error => Ok(()),
+        //     Err(err) => Err(Error::new(
+        //         None,
+        //         format!(
+        //             "Error '{}' != '{}'. Expected '{}'",
+        //             self.expected_error,
+        //             err.error_ty(),
+        //             err.error()
+        //         ),
+        //     )),
+        // }
+    }
+}
+
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for AssertTrap {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        tokens.next().expect_left_paren()?;
+        tokens.next().expect_keyword_token(Keyword::AssertTrap)?;
+
+        // Parse Invoke or Get
+        tokens.next().expect_left_paren()?;
+        match tokens.peek().cloned().expect_keyword()? {
+            Keyword::Invoke => tokens.next().expect_keyword_token(Keyword::Invoke)?,
+            Keyword::Get => tokens.next().expect_keyword_token(Keyword::Get)?,
+            // TODO(Alec): Understand what the difference between invoke and get
+            // do and also correct handle the error below. It's not handled correctly.
+            _ => tokens.next().expect_keyword_token(Keyword::Invoke)?,
+        }
+
+        let _id = get_id(tokens);
+        let function_name = tokens.next().expect_string()?;
+
+        let mut variables: Vec<Box<dyn Execute>> = vec![];
+        while tokens.peek().copied().expect_left_paren().is_ok() {
+            tokens.next().expect_left_paren()?;
+            variables.push(Box::new(Const::parse(tokens)?));
+            tokens.next().expect_right_paren()?;
+        }
+        tokens.next().expect_right_paren()?;
+
+        // Parse Result
+        let mut expected = tokens.next().expect_string()?;
 
         tokens.next().expect_right_paren()?;
         Ok(Self {
@@ -2428,12 +2534,12 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for ElementDefiniti
         }
 
         while let Some(keyword) = get_next_keyword(tokens) {
-            println!("next");
+            // println!("next");
             match keyword {
                 Keyword::Item => {
                     tokens.next().expect_left_paren()?;
                     tokens.next().expect_keyword_token(Keyword::Item)?;
-                    println!("{:?}", tokens.peek());
+                    // println!("{:?}", tokens.peek());
                     if tokens.peek().cloned().expect_left_paren().is_ok() {
                         this.init.push(InBracketInstruction::parse(tokens)?.into());
                     } else {
@@ -2444,9 +2550,9 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for ElementDefiniti
                 }
                 // keyword if keyword.is_reference() => {
                 keyword => {
-                    println!("{:?} {:?}--", tokens.peek(), keyword);
+                    // println!("{:?} {:?}--", tokens.peek(), keyword);
                     this.init.push(InBracketInstruction::parse(tokens)?.into());
-                    println!("complete")
+                    // println!("complete")
                 }
             }
         }

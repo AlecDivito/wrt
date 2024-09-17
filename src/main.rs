@@ -193,6 +193,7 @@ impl Options {
                 (TestBlock::AssertMalformed(module), _) => module.test()?,
                 (TestBlock::AssertInvalid(module), _) => module.test()?,
                 (TestBlock::AssertReturn(module), Some(last)) => module.test(last)?,
+                (TestBlock::AssertTrap(module), Some(last)) => module.test(last)?,
                 _ => panic!("THis shouldn't happen"),
             }
         }

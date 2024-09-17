@@ -5,8 +5,8 @@ use std::{iter::Peekable, str::FromStr};
 use ast::Error;
 
 use crate::structure::types::{
-    Direction, FloatType, FloatVectorShape, HalfType, IntType, IntegerVectorShape, MemoryWidth,
-    MemoryZeroWidth, NumType, SignType, VectorShape,
+    Direction, FloatType, FloatVectorShape, HalfType, IntType, IntegerVectorShape,
+    MemoryLoadNumber, MemoryWidth, MemoryZeroWidth, NumType, SignType, VectorShape,
 };
 
 #[derive(Debug)]
@@ -138,11 +138,7 @@ pub enum Keyword {
     Load(NumType),
     Store(NumType),
 
-    I32Load8(SignType),
-    I32Load16(SignType),
-    I64Load8(SignType),
-    I64Load16(SignType),
-    I64Load32(SignType),
+    LoadN(IntType, SignType, MemoryLoadNumber),
 
     I32Store8,
     I32Store16,
@@ -495,16 +491,16 @@ impl FromStr for Keyword {
             "f32.store" => Store(NumType::F32),
             "f64.store" => Store(NumType::F64),
 
-            "i32.load8_u" => I32Load8(Unsigned),
-            "i32.load8_s" => I32Load8(Signed),
-            "i32.load16_u" => I32Load16(Unsigned),
-            "i32.load16_s" => I32Load16(Signed),
-            "i64.load8_u" => I64Load8(Unsigned),
-            "i64.load8_s" => I64Load8(Signed),
-            "i64.load16_u" => I64Load16(Unsigned),
-            "i64.load16_s" => I64Load16(Signed),
-            "i64.load32_u" => I64Load32(Unsigned),
-            "i64.load32_s" => I64Load32(Signed),
+            "i32.load8_u" => LoadN(IntType::I32, Unsigned, MemoryLoadNumber::Load8),
+            "i32.load8_s" => LoadN(IntType::I32, Signed, MemoryLoadNumber::Load8),
+            "i32.load16_u" => LoadN(IntType::I32, Unsigned, MemoryLoadNumber::Load16),
+            "i32.load16_s" => LoadN(IntType::I32, Signed, MemoryLoadNumber::Load16),
+            "i64.load8_u" => LoadN(IntType::I64, Unsigned, MemoryLoadNumber::Load8),
+            "i64.load8_s" => LoadN(IntType::I64, Signed, MemoryLoadNumber::Load8),
+            "i64.load16_u" => LoadN(IntType::I64, Unsigned, MemoryLoadNumber::Load16),
+            "i64.load16_s" => LoadN(IntType::I64, Signed, MemoryLoadNumber::Load16),
+            "i64.load32_u" => LoadN(IntType::I64, Unsigned, MemoryLoadNumber::Load32),
+            "i64.load32_s" => LoadN(IntType::I64, Signed, MemoryLoadNumber::Load32),
 
             "i32.store8" => I32Store8,
             "i32.store16" => I32Store16,
