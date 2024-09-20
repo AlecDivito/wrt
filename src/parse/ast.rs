@@ -274,6 +274,56 @@ pub fn read_number(expected: NumType, token: &Token) -> Result<Number, Error> {
     })
 }
 
+pub fn read_u128(token: &Token) -> Result<u128, Error> {
+    let source = &token.source;
+    let s = if source.starts_with('-') {
+        &source[1..]
+    } else {
+        &source[..]
+    };
+    let number = if s.starts_with("0x") {
+        let to_parse = s
+            .trim_start_matches("0x")
+            .trim_start_matches('0')
+            .replace('_', "");
+        if to_parse.is_empty() {
+            return Ok(0);
+        }
+        u128::from_str_radix(&to_parse, 16)
+            .map_err(|err| Error::new(Some(token.clone()), format!("Error parsing u32: {:?}", err)))
+    } else {
+        s.replace('_', "")
+            .parse::<u128>()
+            .map_err(|err| Error::new(Some(token.clone()), format!("Error parsing u32: {:?}", err)))
+    }?;
+    Ok(number)
+}
+
+pub fn read_u8(token: &Token) -> Result<u8, Error> {
+    let source = &token.source;
+    let s = if source.starts_with('-') {
+        &source[1..]
+    } else {
+        &source[..]
+    };
+    let number = if s.starts_with("0x") {
+        let to_parse = s
+            .trim_start_matches("0x")
+            .trim_start_matches('0')
+            .replace('_', "");
+        if to_parse.is_empty() {
+            return Ok(0);
+        }
+        u8::from_str_radix(&to_parse, 16)
+            .map_err(|err| Error::new(Some(token.clone()), format!("Error parsing u32: {:?}", err)))
+    } else {
+        s.replace('_', "")
+            .parse::<u8>()
+            .map_err(|err| Error::new(Some(token.clone()), format!("Error parsing u32: {:?}", err)))
+    }?;
+    Ok(number)
+}
+
 pub fn read_u32(token: &Token) -> Result<u32, Error> {
     let source = &token.source;
     let s = if source.starts_with('-') {

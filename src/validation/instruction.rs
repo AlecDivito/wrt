@@ -3,13 +3,13 @@ use std::iter::Peekable;
 use crate::{
     execution::{Number, Stack, Trap},
     parse::{
-        ast::{read_number, read_u32, write_optional, Error, Expect, Parse},
+        ast::{read_number, read_u128, read_u32, read_u8, write_optional, Error, Expect, Parse},
         Keyword, Token,
     },
     structure::{
         module::{get_id, get_next_keyword},
         types::{
-            BlockType,
+            AllVectorShape, BlockType,
             Direction::{Left, Right},
             FloatType, FloatVectorShape, FuncResult, FunctionIndex, GlobalType, HalfType, HeapType,
             InBracketInstruction, Index, Instruction, IntType, IntegerVectorShape, MemoryArgument,
@@ -88,6 +88,25 @@ pub enum Operation {
     MemoryCopy(MemoryCopy),
     MemoryInit(MemoryInit),
     DataDrop(DataDrop),
+    MemoryLoadVector(LoadVectorMemoryOperation),
+    MemoryStoreVector(StoreVectorMemoryOperation),
+
+    // Vector
+    VectorConst(ConstV128),
+    VectorUnary(VectorUnaryOperation),
+    VectorBinary(VectorBinaryOperation),
+    VectorTernary(VectorTernaryOperation),
+    VectorTest(VectorTestOperation),
+    VectorCompare(VectorCompareOperation),
+    VectorShift(VectorShapeShiftOperation),
+    VectorSplat(VectorSplatOperation),
+    VectorExtractLane(VectorExtractLaneOperation),
+    VectorReplaceLane(VectorReplaceLaneOperation),
+    VectorShuffle(VectorShuffleOperation),
+    VectorSwizzle(VectorSwizzleOperation),
+    VectorBitMask(VectorShapeBitMaskOperation),
+    VectorNarrow(VectorShapeNarrowOperation),
+    VectorTop(VectorShapeTopOperation),
 }
 impl Default for Operation {
     fn default() -> Self {
@@ -144,6 +163,25 @@ impl ValidateInstruction for Operation {
             Operation::MemoryCopy(v) => v.validate(ctx, inputs),
             Operation::MemoryInit(v) => v.validate(ctx, inputs),
             Operation::DataDrop(v) => v.validate(ctx, inputs),
+            Operation::MemoryLoadVector(v) => v.validate(ctx, inputs),
+            Operation::MemoryStoreVector(v) => v.validate(ctx, inputs),
+            // Vector
+            Operation::VectorConst(v) => v.validate(ctx, inputs),
+            Operation::VectorUnary(v) => v.validate(ctx, inputs),
+            Operation::VectorBinary(v) => v.validate(ctx, inputs),
+            Operation::VectorTernary(v) => v.validate(ctx, inputs),
+            Operation::VectorTest(v) => v.validate(ctx, inputs),
+            Operation::VectorShift(v) => v.validate(ctx, inputs),
+            Operation::VectorSplat(v) => v.validate(ctx, inputs),
+            Operation::VectorExtractLane(v) => v.validate(ctx, inputs),
+            Operation::VectorReplaceLane(v) => v.validate(ctx, inputs),
+            Operation::VectorShuffle(v) => v.validate(ctx, inputs),
+
+            Operation::VectorCompare(v) => v.validate(ctx, inputs),
+            Operation::VectorSwizzle(v) => v.validate(ctx, inputs),
+            Operation::VectorBitMask(v) => v.validate(ctx, inputs),
+            Operation::VectorNarrow(v) => v.validate(ctx, inputs),
+            Operation::VectorTop(v) => v.validate(ctx, inputs),
         }
     }
 }
@@ -198,6 +236,24 @@ impl std::fmt::Display for Operation {
             Operation::MemoryCopy(opt) => write!(f, "{}", opt),
             Operation::MemoryInit(opt) => write!(f, "{}", opt),
             Operation::DataDrop(opt) => write!(f, "{}", opt),
+            Operation::MemoryLoadVector(opt) => write!(f, "{}", opt),
+            Operation::MemoryStoreVector(opt) => write!(f, "{}", opt),
+            // Vector
+            Operation::VectorConst(opt) => write!(f, "{}", opt),
+            Operation::VectorUnary(opt) => write!(f, "{}", opt),
+            Operation::VectorBinary(opt) => write!(f, "{}", opt),
+            Operation::VectorTernary(opt) => write!(f, "{}", opt),
+            Operation::VectorTest(opt) => write!(f, "{}", opt),
+            Operation::VectorShift(opt) => write!(f, "{}", opt),
+            Operation::VectorSplat(opt) => write!(f, "{}", opt),
+            Operation::VectorExtractLane(opt) => write!(f, "{}", opt),
+            Operation::VectorReplaceLane(opt) => write!(f, "{}", opt),
+            Operation::VectorShuffle(opt) => write!(f, "{}", opt),
+            Operation::VectorCompare(opt) => write!(f, "{}", opt),
+            Operation::VectorSwizzle(opt) => write!(f, "{}", opt),
+            Operation::VectorBitMask(opt) => write!(f, "{}", opt),
+            Operation::VectorNarrow(opt) => write!(f, "{}", opt),
+            Operation::VectorTop(opt) => write!(f, "{}", opt),
         }
     }
 }
@@ -263,21 +319,12 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Operation {
             // Keyword::Declare => todo!(),
             // Keyword::Offset => todo!(),
             // Keyword::Item => todo!(),
-            Keyword::V128Load => todo!(),
-            Keyword::V128Store => todo!(),
-            Keyword::VecLoad8x8(_) => todo!(),
-            Keyword::VecLoad16x4(_) => todo!(),
-            Keyword::VecLoad32x2(_) => todo!(),
-            Keyword::VecLoadSplat(_) => todo!(),
-            Keyword::VecLoadZero(_) => todo!(),
-            Keyword::VecLoadLane(_) => todo!(),
-            Keyword::VecStoreLane(_) => todo!(),
+
             // number stuff
             Keyword::Const(expected) => {
                 let value = read_number(expected, tokens.next().expect_number()?)?;
                 Operation::Const(Const::new(expected, value))
             }
-            Keyword::ConstV128 => todo!(),
             Keyword::RefNull => Operation::RefNull(RefNull::parse(tokens)?),
             Keyword::RefFunc => Operation::RefFunc(RefFunc::parse(tokens)?),
             Keyword::RefIsNull => Operation::RefIsNull(RefIsNull),
@@ -533,83 +580,326 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Operation {
                 NumType::I64,
                 ConvertFunction::Reinterpret(NumType::F64),
             )),
-            Keyword::V128Not => todo!(),
-            Keyword::V128And => todo!(),
-            Keyword::V128AndNot => todo!(),
-            Keyword::V128Or => todo!(),
-            Keyword::V128XOr => todo!(),
-            Keyword::V128BitSelect => todo!(),
-            Keyword::V128AnyTrue => todo!(),
-            Keyword::VecIntNegative(_) => todo!(),
-            Keyword::VecIntAbsolute(_) => todo!(),
-            Keyword::VecI8x16PopCnt => todo!(),
-            Keyword::VecI8x16AverageUnsigned => todo!(),
-            Keyword::VecI16x8AverageUnsigned => todo!(),
-            Keyword::VecFloatNegative(_) => todo!(),
-            Keyword::VecFloatAbsolute(_) => todo!(),
-            Keyword::VecFloatSquareRoot(_) => todo!(),
-            Keyword::VecFloatCeil(_) => todo!(),
-            Keyword::VecFloatFloor(_) => todo!(),
-            Keyword::VecFloatTruncate(_) => todo!(),
-            Keyword::VecFloatNearest(_) => todo!(),
-            Keyword::I32x4TruncSatF32x4(_) => todo!(),
-            Keyword::I32x4TruncSatF64x2Zero(_) => todo!(),
-            Keyword::F64x2PromoteLowF32x4 => todo!(),
-            Keyword::F32x4PemoteF64x2Zero => todo!(),
-            Keyword::F32x4ConvertI32x4(_) => todo!(),
-            Keyword::F64x2ConvertLowI32x4(_) => todo!(),
+            Keyword::ConstV128 => Self::VectorConst(ConstV128::parse(tokens)?),
+            Keyword::V128Load => Self::MemoryLoadVector(LoadVectorMemoryOperation::load(
+                MemoryArgument::parse(tokens)?,
+            )),
+            Keyword::V128Store => Self::MemoryStoreVector(StoreVectorMemoryOperation::load(
+                MemoryArgument::parse(tokens)?,
+            )),
+
+            Keyword::VecLoad(shape) => Self::MemoryLoadVector(LoadVectorMemoryOperation::new(
+                shape,
+                MemoryArgument::parse(tokens)?,
+            )),
+            Keyword::VecLoadSplat(shape) => Self::MemoryLoadVector(LoadVectorMemoryOperation::new(
+                VectorMemoryOp::Splat(shape),
+                MemoryArgument::parse(tokens)?,
+            )),
+            Keyword::VecLoadZero(shape) => Self::MemoryLoadVector(LoadVectorMemoryOperation::new(
+                VectorMemoryOp::Zero(shape),
+                MemoryArgument::parse(tokens)?,
+            )),
+            Keyword::VecLoadLane(shape) => Self::MemoryLoadVector(LoadVectorMemoryOperation::lane(
+                VectorMemoryOp::Lane(shape),
+                MemoryArgument::parse(tokens)?,
+                LaneIndex::parse(tokens)?,
+            )),
+            Keyword::VecStoreLane(shape) => {
+                Self::MemoryStoreVector(StoreVectorMemoryOperation::lane(
+                    VectorMemoryOp::Lane(shape),
+                    MemoryArgument::parse(tokens)?,
+                    LaneIndex::parse(tokens)?,
+                ))
+            }
+
+            Keyword::V128Not => Self::VectorUnary(VectorUnaryOperation::new(
+                AllVectorShape::V128,
+                VectorUnaryFunction::Not,
+            )),
+            Keyword::V128And => Self::VectorBinary(VectorBinaryOperation::new(
+                AllVectorShape::V128,
+                VectorBinaryFunction::And,
+            )),
+            Keyword::V128AndNot => Self::VectorBinary(VectorBinaryOperation::new(
+                AllVectorShape::V128,
+                VectorBinaryFunction::AndNot,
+            )),
+            Keyword::V128Or => Self::VectorBinary(VectorBinaryOperation::new(
+                AllVectorShape::V128,
+                VectorBinaryFunction::Or,
+            )),
+            Keyword::V128XOr => Self::VectorBinary(VectorBinaryOperation::new(
+                AllVectorShape::V128,
+                VectorBinaryFunction::Xor,
+            )),
+            Keyword::V128BitSelect => Self::VectorTernary(VectorTernaryOperation::new(
+                AllVectorShape::V128,
+                VectorTernaryFunction::BitSelect,
+            )),
+            Keyword::V128AnyTrue => Self::VectorTest(VectorTestOperation::new(
+                AllVectorShape::V128,
+                VectorTestFunction::AnyTrue,
+            )),
+            Keyword::VecIntNegative(shape) => Self::VectorUnary(VectorUnaryOperation::new(
+                AllVectorShape::Int(shape),
+                VectorUnaryFunction::Neg,
+            )),
+            Keyword::VecIntAbsolute(shape) => Self::VectorUnary(VectorUnaryOperation::new(
+                AllVectorShape::Int(shape),
+                VectorUnaryFunction::Abs,
+            )),
+            Keyword::VecI8x16PopCnt => Self::VectorUnary(VectorUnaryOperation::new(
+                AllVectorShape::Int(IntegerVectorShape::I8x16),
+                VectorUnaryFunction::Popcnt,
+            )),
+            Keyword::VecI8x16AverageUnsigned => Self::VectorBinary(VectorBinaryOperation::new(
+                AllVectorShape::Int(IntegerVectorShape::I8x16),
+                VectorBinaryFunction::Avg(SignType::Unsigned),
+            )),
+            Keyword::VecI16x8AverageUnsigned => Self::VectorBinary(VectorBinaryOperation::new(
+                AllVectorShape::Int(IntegerVectorShape::I16x8),
+                VectorBinaryFunction::Avg(SignType::Unsigned),
+            )),
+            Keyword::VecFloatNegative(shape) => Self::VectorUnary(VectorUnaryOperation::new(
+                AllVectorShape::Float(shape),
+                VectorUnaryFunction::Neg,
+            )),
+            Keyword::VecFloatAbsolute(shape) => Self::VectorUnary(VectorUnaryOperation::new(
+                AllVectorShape::Float(shape),
+                VectorUnaryFunction::Abs,
+            )),
+            Keyword::VecFloatSquareRoot(shape) => Self::VectorUnary(VectorUnaryOperation::new(
+                AllVectorShape::Float(shape),
+                VectorUnaryFunction::Sqrt,
+            )),
+            Keyword::VecFloatCeil(shape) => Self::VectorUnary(VectorUnaryOperation::new(
+                AllVectorShape::Float(shape),
+                VectorUnaryFunction::Ceil,
+            )),
+            Keyword::VecFloatFloor(shape) => Self::VectorUnary(VectorUnaryOperation::new(
+                AllVectorShape::Float(shape),
+                VectorUnaryFunction::Floor,
+            )),
+            Keyword::VecFloatTruncate(shape) => Self::VectorUnary(VectorUnaryOperation::new(
+                AllVectorShape::Float(shape),
+                VectorUnaryFunction::Trunc,
+            )),
+            Keyword::VecFloatNearest(shape) => Self::VectorUnary(VectorUnaryOperation::new(
+                AllVectorShape::Float(shape),
+                VectorUnaryFunction::Nearest,
+            )),
+            Keyword::I32x4TruncSatF32x4(sign) => Self::VectorTop(VectorShapeTopOperation::new(
+                IntegerVectorShape::I32x4,
+                HalfType::High,
+                FloatVectorShape::F32x4,
+                sign,
+                VectorTopFunction::TruncSat,
+                false,
+            )),
+            Keyword::I32x4TruncSatF64x2Zero(sign) => Self::VectorTop(VectorShapeTopOperation::new(
+                IntegerVectorShape::I32x4,
+                HalfType::High,
+                FloatVectorShape::F64x2,
+                sign,
+                VectorTopFunction::TruncSat,
+                true,
+            )),
+            Keyword::F64x2PromoteLowF32x4 => Self::VectorTop(VectorShapeTopOperation::new(
+                FloatVectorShape::F64x2,
+                HalfType::Low,
+                FloatVectorShape::F32x4,
+                SignType::Signed,
+                VectorTopFunction::Promote,
+                false,
+            )),
+            Keyword::F32x4PromoteF64x2Zero => Self::VectorTop(VectorShapeTopOperation::new(
+                FloatVectorShape::F32x4,
+                HalfType::Low,
+                FloatVectorShape::F64x2,
+                SignType::Signed,
+                VectorTopFunction::Promote,
+                true,
+            )),
+            Keyword::F32x4ConvertI32x4(sign) => Self::VectorTop(VectorShapeTopOperation::new(
+                FloatVectorShape::F32x4,
+                HalfType::Low,
+                IntegerVectorShape::I32x4,
+                sign,
+                VectorTopFunction::Convert,
+                false,
+            )),
+            Keyword::F64x2ConvertLowI32x4(sign) => Self::VectorTop(VectorShapeTopOperation::new(
+                FloatVectorShape::F64x2,
+                HalfType::Low,
+                IntegerVectorShape::I32x4,
+                sign,
+                VectorTopFunction::Convert,
+                false,
+            )),
             Keyword::I16x8ExtendAddPairwiseI8x16(_) => todo!(),
             Keyword::I32x4ExtaddPairwiseI16x8(_) => todo!(),
-            Keyword::VecIntEqual(_) => todo!(),
-            Keyword::VecIntNotEqual(_) => todo!(),
-            Keyword::VecIntLessThen { shape, sign } => todo!(),
-            Keyword::VecIntLessOrEqual { shape, sign } => todo!(),
-            Keyword::VecIntGreaterThen { shape, sign } => todo!(),
-            Keyword::VecIntGreaterOrEqual { shape, sign } => todo!(),
-            Keyword::VecEqualFloat(_) => todo!(),
-            Keyword::VecNotEqualFloat(_) => todo!(),
-            Keyword::VecLessThenFloat(_) => todo!(),
-            Keyword::VecLessOrEqualFloat(_) => todo!(),
-            Keyword::VecGreaterThenFloat(_) => todo!(),
-            Keyword::VecGreaterOrEqualFloat(_) => todo!(),
-            Keyword::VecSwizzleFloatI8x16 => todo!(),
-            Keyword::VecIntAdd(_) => todo!(),
-            Keyword::VecIntSub(_) => todo!(),
-            Keyword::VecIntMultiplyI16x8 => todo!(),
-            Keyword::VecIntMultiplyI32x4 => todo!(),
-            Keyword::VecIntMultiplyI64x2 => todo!(),
+            Keyword::VecIntEqual(shape) => Self::VectorCompare(VectorCompareOperation::new(
+                VectorCompareFunction::Equal,
+                VectorShape::Int(shape),
+            )),
+            Keyword::VecIntNotEqual(shape) => Self::VectorCompare(VectorCompareOperation::new(
+                VectorCompareFunction::NotEqual,
+                VectorShape::Int(shape),
+            )),
+            Keyword::VecIntLessThen { shape, sign } => {
+                Self::VectorCompare(VectorCompareOperation::new(
+                    VectorCompareFunction::LessThen(sign),
+                    VectorShape::Int(shape),
+                ))
+            }
+            Keyword::VecIntLessOrEqual { shape, sign } => {
+                Self::VectorCompare(VectorCompareOperation::new(
+                    VectorCompareFunction::LessOrEqual(sign),
+                    VectorShape::Int(shape),
+                ))
+            }
+            Keyword::VecIntGreaterThen { shape, sign } => {
+                Self::VectorCompare(VectorCompareOperation::new(
+                    VectorCompareFunction::GreaterThen(sign),
+                    VectorShape::Int(shape),
+                ))
+            }
+            Keyword::VecIntGreaterOrEqual { shape, sign } => {
+                Self::VectorCompare(VectorCompareOperation::new(
+                    VectorCompareFunction::GreaterOrEqual(sign),
+                    VectorShape::Int(shape),
+                ))
+            }
+            Keyword::VecEqualFloat(shape) => Self::VectorCompare(VectorCompareOperation::new(
+                VectorCompareFunction::FEqual,
+                VectorShape::Float(shape),
+            )),
+            Keyword::VecNotEqualFloat(shape) => Self::VectorCompare(VectorCompareOperation::new(
+                VectorCompareFunction::FNotEqual,
+                VectorShape::Float(shape),
+            )),
+            Keyword::VecLessThenFloat(shape) => Self::VectorCompare(VectorCompareOperation::new(
+                VectorCompareFunction::FLessThen,
+                VectorShape::Float(shape),
+            )),
+            Keyword::VecLessOrEqualFloat(shape) => {
+                Self::VectorCompare(VectorCompareOperation::new(
+                    VectorCompareFunction::FLessOrEqual,
+                    VectorShape::Float(shape),
+                ))
+            }
+            Keyword::VecGreaterThenFloat(shape) => {
+                Self::VectorCompare(VectorCompareOperation::new(
+                    VectorCompareFunction::FGreaterThen,
+                    VectorShape::Float(shape),
+                ))
+            }
+            Keyword::VecGreaterOrEqualFloat(shape) => {
+                Self::VectorCompare(VectorCompareOperation::new(
+                    VectorCompareFunction::FGreaterOrEqual,
+                    VectorShape::Float(shape),
+                ))
+            }
+            Keyword::VecSwizzleFloatI8x16 => Self::VectorSwizzle(VectorSwizzleOperation {}),
+            Keyword::VecIntAdd(shape) => Self::VectorBinary(VectorBinaryOperation::new(
+                AllVectorShape::Int(shape),
+                VectorBinaryFunction::Add,
+            )),
+            Keyword::VecIntSub(shape) => Self::VectorBinary(VectorBinaryOperation::new(
+                AllVectorShape::Int(shape),
+                VectorBinaryFunction::Sub,
+            )),
+            Keyword::VecIntMultiply(shape) => Self::VectorBinary(VectorBinaryOperation::new(
+                AllVectorShape::Int(shape),
+                VectorBinaryFunction::Mul,
+            )),
             Keyword::VecAddSatI16x8(_) => todo!(),
             Keyword::VecSubtractSatI16x8(_) => todo!(),
             Keyword::VecI32x4DotProductOfI16x8Signed => todo!(),
-            Keyword::VecMinInt { shape, sign } => todo!(),
-            Keyword::VecMaxInt { shape, sign } => todo!(),
+            Keyword::VecMinInt { shape, sign } => Self::VectorBinary(VectorBinaryOperation::new(
+                AllVectorShape::Int(shape),
+                VectorBinaryFunction::OpMax(sign),
+            )),
+            Keyword::VecMaxInt { shape, sign } => Self::VectorBinary(VectorBinaryOperation::new(
+                AllVectorShape::Int(shape),
+                VectorBinaryFunction::OpMin(sign),
+            )),
             Keyword::VecSubFloat(_) => todo!(),
             Keyword::VecAddSatI8x16(_) => todo!(),
             Keyword::VecSubtractSatI8x16(_) => todo!(),
-            Keyword::VecAddFloat(_) => todo!(),
-            Keyword::VecDivFloat(_) => todo!(),
-            Keyword::VecMulFloat(_) => todo!(),
-            Keyword::VecMinFloat(_) => todo!(),
-            Keyword::VecMaxFloat(_) => todo!(),
-            Keyword::VecPMin(_) => todo!(),
-            Keyword::VecPMax(_) => todo!(),
-            Keyword::I16x8Q15mulrSatS => todo!(),
-            Keyword::I8x16NarrowI16x8(_) => todo!(),
-            Keyword::I16x8NarrowI32x4(_) => todo!(),
-            Keyword::I16x8ExtendI8x16 { half, sign } => todo!(),
-            Keyword::I32x4ExtendI16x8 { half, sign } => todo!(),
-            Keyword::I64x2ExtendI32x4 { half, sign } => todo!(),
-            Keyword::I16x8ExtendMultiplyI8x16 { half, sign } => todo!(),
-            Keyword::I32x4ExtendMultiplyI16x8 { half, sign } => todo!(),
-            Keyword::I64x2ExtendMultiplyI32x4 { half, sign } => todo!(),
-            Keyword::VecTest(_) => todo!(),
-            Keyword::VecBitmask(_) => todo!(),
-            Keyword::VecShiftLeft(_) => todo!(),
+            Keyword::VecAddFloat(shape) => Self::VectorBinary(VectorBinaryOperation::new(
+                AllVectorShape::Float(shape),
+                VectorBinaryFunction::Add,
+            )),
+            Keyword::VecDivFloat(shape) => Self::VectorBinary(VectorBinaryOperation::new(
+                AllVectorShape::Float(shape),
+                VectorBinaryFunction::Div,
+            )),
+            Keyword::VecMulFloat(shape) => Self::VectorBinary(VectorBinaryOperation::new(
+                AllVectorShape::Float(shape),
+                VectorBinaryFunction::Mul,
+            )),
+            Keyword::VecMinFloat(shape) => Self::VectorBinary(VectorBinaryOperation::new(
+                AllVectorShape::Float(shape),
+                VectorBinaryFunction::Min,
+            )),
+            Keyword::VecMaxFloat(shape) => Self::VectorBinary(VectorBinaryOperation::new(
+                AllVectorShape::Float(shape),
+                VectorBinaryFunction::Max,
+            )),
+            Keyword::VecPMin(shape) => Self::VectorBinary(VectorBinaryOperation::new(
+                AllVectorShape::Float(shape),
+                VectorBinaryFunction::PMin,
+            )),
+            Keyword::VecPMax(shape) => Self::VectorBinary(VectorBinaryOperation::new(
+                AllVectorShape::Float(shape),
+                VectorBinaryFunction::PMax,
+            )),
+            Keyword::I16x8Q15mulrSatS => Self::VectorBinary(VectorBinaryOperation::new(
+                AllVectorShape::Int(IntegerVectorShape::I16x8),
+                VectorBinaryFunction::Q15mulr_Sat_S,
+            )),
+            Keyword::I8x16NarrowI16x8(sign) => Self::VectorNarrow(VectorShapeNarrowOperation::new(
+                IntegerVectorShape::I8x16,
+                IntegerVectorShape::I16x8,
+                sign,
+            )),
+            Keyword::I16x8NarrowI32x4(sign) => Self::VectorNarrow(VectorShapeNarrowOperation::new(
+                IntegerVectorShape::I16x8,
+                IntegerVectorShape::I32x4,
+                sign,
+            )),
+            Keyword::Extend {
+                input,
+                output,
+                half,
+                sign,
+            } => Self::VectorTop(VectorShapeTopOperation::new(
+                input,
+                half,
+                output,
+                sign,
+                VectorTopFunction::Extend,
+                false,
+            )),
+            Keyword::VecTest(test) => todo!(),
+            Keyword::VecBitmask(shape) => {
+                Self::VectorBitMask(VectorShapeBitMaskOperation::new(shape))
+            }
+            Keyword::VecShiftLeft(shape) => {
+                Self::VectorShift(VectorShapeShiftOperation::new(shape))
+            }
             Keyword::VecShiftRight { shape, sign } => todo!(),
-            Keyword::VecShuffle => todo!(),
-            Keyword::VecSplat(_) => todo!(),
-            Keyword::VecExtract { shape, sign } => todo!(),
-            Keyword::VecReplate(_) => todo!(),
+            Keyword::VecShuffle => Self::VectorShuffle(VectorShuffleOperation::parse(tokens)?),
+            Keyword::VecSplat(shape) => Self::VectorSplat(VectorSplatOperation::new(shape)),
+            Keyword::VecExtract { shape, sign } => Self::VectorExtractLane(
+                VectorExtractLaneOperation::new(shape, sign, LaneIndex::parse(tokens)?),
+            ),
+            Keyword::VecReplace(shape) => Self::VectorReplaceLane(VectorReplaceLaneOperation::new(
+                shape,
+                LaneIndex::parse(tokens)?,
+            )),
             // Keyword::Module => todo!(),
             // Keyword::Bin => todo!(),
             // Keyword::Quote => todo!(),
@@ -617,12 +907,12 @@ impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for Operation {
             // Keyword::Register => todo!(),
             // Keyword::Invoke => todo!(),
             // Keyword::Get => todo!(),
-            Keyword::AssertMalformed => todo!(),
-            Keyword::AssertInvalid => todo!(),
-            Keyword::AssertUnlinkable => todo!(),
-            Keyword::AssertReturn => todo!(),
-            Keyword::AssertTrap => todo!(),
-            Keyword::AssertExhaustion => todo!(),
+            // Keyword::AssertMalformed => todo!(),
+            // Keyword::AssertInvalid => todo!(),
+            // Keyword::AssertUnlinkable => todo!(),
+            // Keyword::AssertReturn => todo!(),
+            // Keyword::AssertTrap => todo!(),
+            // Keyword::AssertExhaustion => todo!(),
             Keyword::NaNCanonical => todo!(),
             Keyword::NaNArithmetic(_) => todo!(),
             // Keyword::Infinit => todo!(),
@@ -1061,7 +1351,18 @@ impl ValidateInstruction for FunctionReferenceOperation {
  * Vector Instructions
  * https://webassembly.github.io/spec/core/valid/instructions.html#vector-instructions
  */
+#[derive(Clone, Debug)]
 pub struct ConstV128(u128);
+impl std::fmt::Display for ConstV128 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "v128.const {}", self.0)
+    }
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for ConstV128 {
+    fn parse(tokens: &mut Peekable<I>) -> Result<Self, crate::parse::ast::Error> {
+        Ok(ConstV128(read_u128(tokens.next().expect_number()?)?))
+    }
+}
 impl ValidateInstruction for ConstV128 {
     // type Output = [ValueType; 1];
     fn validate(&self, _: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
@@ -1069,7 +1370,52 @@ impl ValidateInstruction for ConstV128 {
     }
 }
 
-pub struct VectorUnaryOperation;
+#[derive(Clone, Debug)]
+enum VectorUnaryFunction {
+    // both (vv)
+    Not,
+    Popcnt, // only i8x16
+    // int (vi) and (vf)
+    Abs,
+    Neg,
+    // vf
+    Sqrt,
+    Ceil,
+    Floor,
+    Trunc,
+    Nearest,
+}
+impl std::fmt::Display for VectorUnaryFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Not => write!(f, "not"),
+            Self::Abs => write!(f, "abs"),
+            Self::Neg => write!(f, "beg"),
+            Self::Sqrt => write!(f, "sqrt"),
+            Self::Ceil => write!(f, "ceil"),
+            Self::Floor => write!(f, "floor"),
+            Self::Trunc => write!(f, "trunc"),
+            Self::Nearest => write!(f, "nearest"),
+            Self::Popcnt => write!(f, "popcnt"),
+        }
+    }
+}
+#[derive(Clone, Debug)]
+pub struct VectorUnaryOperation {
+    shape: AllVectorShape,
+    func: VectorUnaryFunction,
+}
+
+impl VectorUnaryOperation {
+    pub fn new(shape: AllVectorShape, func: VectorUnaryFunction) -> Self {
+        Self { shape, func }
+    }
+}
+impl std::fmt::Display for VectorUnaryOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}", self.shape, self.func,)
+    }
+}
 impl ValidateInstruction for VectorUnaryOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, _: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
@@ -1077,7 +1423,66 @@ impl ValidateInstruction for VectorUnaryOperation {
     }
 }
 
-pub struct VectorBinaryOperation;
+#[derive(Clone, Debug)]
+pub enum VectorBinaryFunction {
+    // (vv) int
+    And,
+    AndNot,
+    Or,
+    Xor,
+    // (vi) (and float)
+    Add,
+    Sub,
+    // FLoat
+    Mul,
+    Div,
+    Min,
+    Max,
+    PMin,
+    PMax,
+    // other
+    Q15mulr_Sat_S, // i16x8
+    OpMax(SignType),
+    OpMin(SignType),
+    Avg(SignType),
+}
+impl std::fmt::Display for VectorBinaryFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::And => write!(f, "and"),
+            Self::AndNot => write!(f, "andnot"),
+            Self::Or => write!(f, "or"),
+            Self::Xor => write!(f, "xor"),
+            Self::Add => write!(f, "add"),
+            Self::Sub => write!(f, "sub"),
+            Self::Mul => write!(f, "mul"),
+            Self::Div => write!(f, "div"),
+            Self::Min => write!(f, "min"),
+            Self::Max => write!(f, "max"),
+            Self::PMin => write!(f, "pmin"),
+            Self::PMax => write!(f, "pmax"),
+            Self::Q15mulr_Sat_S => write!(f, "q15mulr_sat_s"),
+            Self::OpMax(sign) => write!(f, "max_{}", sign),
+            Self::OpMin(sign) => write!(f, "min_{}", sign),
+            Self::Avg(sign) => write!(f, "avgr_{}", sign),
+        }
+    }
+}
+#[derive(Clone, Debug)]
+pub struct VectorBinaryOperation {
+    shape: AllVectorShape,
+    func: VectorBinaryFunction,
+}
+impl VectorBinaryOperation {
+    pub fn new(shape: AllVectorShape, func: VectorBinaryFunction) -> Self {
+        Self { shape, func }
+    }
+}
+impl std::fmt::Display for VectorBinaryOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}", self.shape, self.func)
+    }
+}
 impl ValidateInstruction for VectorBinaryOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, _: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
@@ -1087,7 +1492,34 @@ impl ValidateInstruction for VectorBinaryOperation {
     }
 }
 
-pub struct VectorTernaryOperation;
+#[derive(Clone, Debug)]
+pub enum VectorTernaryFunction {
+    // (vv)
+    BitSelect, // (vi) (and float)
+}
+impl std::fmt::Display for VectorTernaryFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BitSelect => write!(f, "bitselect"),
+        }
+    }
+}
+#[derive(Clone, Debug)]
+pub struct VectorTernaryOperation {
+    shape: AllVectorShape,
+    func: VectorTernaryFunction,
+}
+
+impl VectorTernaryOperation {
+    pub fn new(shape: AllVectorShape, func: VectorTernaryFunction) -> Self {
+        Self { shape, func }
+    }
+}
+impl std::fmt::Display for VectorTernaryOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}", self.shape, self.func)
+    }
+}
 impl ValidateInstruction for VectorTernaryOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, _: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
@@ -1098,7 +1530,35 @@ impl ValidateInstruction for VectorTernaryOperation {
     }
 }
 
-pub struct VectorTestOperation;
+#[derive(Clone, Debug)]
+pub enum VectorTestFunction {
+    // (vv)
+    AnyTrue, // (vi) (and float)
+}
+impl std::fmt::Display for VectorTestFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AnyTrue => write!(f, "any_true"),
+        }
+    }
+}
+#[derive(Clone, Debug)]
+pub struct VectorTestOperation {
+    shape: AllVectorShape,
+    func: VectorTestFunction,
+}
+
+impl VectorTestOperation {
+    pub fn new(shape: AllVectorShape, func: VectorTestFunction) -> Self {
+        Self { shape, func }
+    }
+}
+
+impl std::fmt::Display for VectorTestOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}", self.shape, self.func)
+    }
+}
 impl ValidateInstruction for VectorTestOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, _: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
@@ -1109,7 +1569,13 @@ impl ValidateInstruction for VectorTestOperation {
 
 // https://webassembly.github.io/spec/core/valid/instructions.html#mathsf-i8x16-xref-syntax-instructions-syntax-instr-vec-mathsf-swizzle
 // i8x16 swizzle
+#[derive(Clone, Debug)]
 pub struct VectorSwizzleOperation;
+impl std::fmt::Display for VectorSwizzleOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "i8x16.swizzle")
+    }
+}
 impl ValidateInstruction for VectorSwizzleOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, _: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
@@ -1119,7 +1585,18 @@ impl ValidateInstruction for VectorSwizzleOperation {
     }
 }
 
-pub struct LaneIndex(u32);
+#[derive(Clone, Debug)]
+pub struct LaneIndex(u8);
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for LaneIndex {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        Ok(LaneIndex(read_u8(tokens.next().expect_number()?)?))
+    }
+}
+impl std::fmt::Display for LaneIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 impl LaneIndex {
     pub fn validate(&self) -> bool {
         self.0 < 32
@@ -1149,9 +1626,22 @@ impl LaneIndex {
 
 // https://webassembly.github.io/spec/core/valid/instructions.html#mathsf-i8x16-xref-syntax-instructions-syntax-instr-vec-mathsf-shuffle-xref-syntax-instructions-syntax-laneidx-mathit-laneidx-16
 // i8x16
+#[derive(Clone, Debug)]
 pub struct VectorShuffleOperation {
     // Index lane can't be larger then the number 32
     lane_index: LaneIndex,
+}
+impl<'a, I: Iterator<Item = &'a Token> + Clone> Parse<'a, I> for VectorShuffleOperation {
+    fn parse(tokens: &mut std::iter::Peekable<I>) -> Result<Self, Error> {
+        Ok(Self {
+            lane_index: LaneIndex::parse(tokens)?,
+        })
+    }
+}
+impl std::fmt::Display for VectorShuffleOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "i8x16.shuffle")
+    }
 }
 impl ValidateInstruction for VectorShuffleOperation {
     // type Output = [ValueType; 1];
@@ -1170,8 +1660,19 @@ impl ValidateInstruction for VectorShuffleOperation {
 // shape.splat
 // shape => i8x16, i16x8, 132x4, i64x2, f32x4, f64x2
 // TODO(Alec): Come back to this
+#[derive(Clone, Debug)]
 pub struct VectorSplatOperation {
     shape: VectorShape,
+}
+impl VectorSplatOperation {
+    pub fn new(shape: VectorShape) -> Self {
+        Self { shape }
+    }
+}
+impl std::fmt::Display for VectorSplatOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.splat", self.shape)
+    }
 }
 impl ValidateInstruction for VectorSplatOperation {
     // type Output = [ValueType; 1];
@@ -1188,10 +1689,33 @@ impl ValidateInstruction for VectorSplatOperation {
 
 // https://webassembly.github.io/spec/core/valid/instructions.html#xref-syntax-instructions-syntax-shape-mathit-shape-mathsf-xref-syntax-instructions-syntax-instr-vec-mathsf-extract-lane-mathsf-xref-syntax-instructions-syntax-sx-mathit-sx-xref-syntax-instructions-syntax-laneidx-mathit-laneidx
 // shape.extract_lane_sx laneindex
+#[derive(Clone, Debug)]
 pub struct VectorExtractLaneOperation {
     shape: VectorShape,
-    sign: SignType,
+    sign: Option<SignType>,
     lane_index: LaneIndex,
+}
+
+impl VectorExtractLaneOperation {
+    pub fn new(shape: VectorShape, sign: Option<SignType>, lane_index: LaneIndex) -> Self {
+        Self {
+            shape,
+            sign,
+            lane_index,
+        }
+    }
+}
+impl std::fmt::Display for VectorExtractLaneOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.sign {
+            Some(sign) => write!(
+                f,
+                "{}.extract_lane_{} {}",
+                self.shape, sign, self.lane_index
+            ),
+            None => write!(f, "{}.extract_lane {}", self.shape, self.lane_index),
+        }
+    }
 }
 impl ValidateInstruction for VectorExtractLaneOperation {
     // type Output = [ValueType; 1];
@@ -1217,9 +1741,20 @@ impl ValidateInstruction for VectorExtractLaneOperation {
 
 // https://webassembly.github.io/spec/core/valid/instructions.html#xref-syntax-instructions-syntax-shape-mathit-shape-mathsf-xref-syntax-instructions-syntax-instr-vec-mathsf-replace-lane-xref-syntax-instructions-syntax-laneidx-mathit-laneidx
 // shape.replace_lane lane index
+#[derive(Clone, Debug)]
 pub struct VectorReplaceLaneOperation {
     shape: VectorShape,
     lane_index: LaneIndex,
+}
+impl VectorReplaceLaneOperation {
+    pub fn new(shape: VectorShape, lane_index: LaneIndex) -> Self {
+        Self { shape, lane_index }
+    }
+}
+impl std::fmt::Display for VectorReplaceLaneOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.replace_lane {}", self.shape, self.lane_index)
+    }
 }
 impl ValidateInstruction for VectorReplaceLaneOperation {
     // type Output = [ValueType; 1];
@@ -1235,7 +1770,67 @@ impl ValidateInstruction for VectorReplaceLaneOperation {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum VectorCompareFunction {
+    // int
+    Equal,
+    NotEqual,
+    LessThen(SignType),
+    GreaterThen(SignType),
+    LessOrEqual(SignType),
+    GreaterOrEqual(SignType),
+    // float
+    FEqual,
+    FNotEqual,
+    FLessThen,
+    FGreaterThen,
+    FLessOrEqual,
+    FGreaterOrEqual,
+}
+impl std::fmt::Display for VectorCompareFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Equal => write!(f, "eq"),
+            Self::NotEqual => write!(f, "ne"),
+            Self::LessThen(sign_type) => write!(f, "lt_{}", sign_type),
+            Self::GreaterThen(sign_type) => write!(f, "gt_{}", sign_type),
+            Self::LessOrEqual(sign_type) => write!(f, "le_{}", sign_type),
+            Self::GreaterOrEqual(sign_type) => write!(f, "ge_{}", sign_type),
+            // float
+            Self::FEqual => write!(f, "eq"),
+            Self::FNotEqual => write!(f, "ne"),
+            Self::FLessThen => write!(f, "lt",),
+            Self::FGreaterThen => write!(f, "gt",),
+            Self::FLessOrEqual => write!(f, "le",),
+            Self::FGreaterOrEqual => write!(f, "ge",),
+        }
+    }
+}
+#[derive(Clone, Debug)]
+pub struct VectorCompareOperation {
+    func: VectorCompareFunction,
+    shape: VectorShape,
+}
+
+impl VectorCompareOperation {
+    pub fn new(func: VectorCompareFunction, shape: VectorShape) -> Self {
+        Self { func, shape }
+    }
+}
+impl std::fmt::Display for VectorCompareOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}", self.shape, self.func)
+    }
+}
+impl ValidateInstruction for VectorCompareOperation {
+    // type Output = [ValueType; 1];
+    fn validate(&self, _: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
+        todo!("Implement validation for vector compare")
+    }
+}
+
 // https://webassembly.github.io/spec/core/valid/instructions.html#xref-syntax-instructions-syntax-shape-mathit-shape-mathsf-xref-syntax-instructions-syntax-vunop-mathit-vunop
+#[derive(Clone, Debug)]
 pub struct VectorShapeUnaryOperation {
     _shape: VectorShape,
 }
@@ -1248,6 +1843,7 @@ impl ValidateInstruction for VectorShapeUnaryOperation {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct VectorShapeBinaryOperation {
     _shape: VectorShape,
 }
@@ -1263,6 +1859,7 @@ impl ValidateInstruction for VectorShapeBinaryOperation {
 }
 
 // shape.vrelop
+#[derive(Clone, Debug)]
 pub struct VectorShapeRelationOperation {
     _shape: VectorShape,
 }
@@ -1278,8 +1875,19 @@ impl ValidateInstruction for VectorShapeRelationOperation {
 }
 
 // ishape.vishiftop
+#[derive(Clone, Debug)]
 pub struct VectorShapeShiftOperation {
-    _shape: IntegerVectorShape,
+    shape: IntegerVectorShape,
+}
+impl VectorShapeShiftOperation {
+    pub fn new(shape: IntegerVectorShape) -> Self {
+        Self { shape }
+    }
+}
+impl std::fmt::Display for VectorShapeShiftOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.vishiftop", self.shape)
+    }
 }
 impl ValidateInstruction for VectorShapeShiftOperation {
     // type Output = [ValueType; 1];
@@ -1296,6 +1904,7 @@ impl ValidateInstruction for VectorShapeShiftOperation {
 
 // shape.vtestop
 // https://webassembly.github.io/spec/core/valid/instructions.html#xref-syntax-instructions-syntax-shape-mathit-shape-mathsf-xref-syntax-instructions-syntax-vtestop-mathit-vtestop
+#[derive(Clone, Debug)]
 pub struct VectorShapeTestOperation {
     _shape: VectorShape,
 }
@@ -1309,25 +1918,99 @@ impl ValidateInstruction for VectorShapeTestOperation {
     }
 }
 
-// shape.vcvtop_(half)_(shape)_(signed)_zero
-pub struct VectorShapeTopHalfZeroOperation {
-    _shape: VectorShape,
-    _sign: SignType,
-    _half: HalfType,
+#[derive(Clone, Debug)]
+pub enum VectorTopFunction {
+    Extend,
+    TruncSat,
+    Convert,
+    Demote,
+    Promote,
 }
-impl ValidateInstruction for VectorShapeTopHalfZeroOperation {
+impl std::fmt::Display for VectorTopFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VectorTopFunction::Extend => write!(f, "extend"),
+            VectorTopFunction::TruncSat => write!(f, "trunc_sat"),
+            VectorTopFunction::Convert => write!(f, "convert"),
+            VectorTopFunction::Demote => write!(f, "demote"),
+            VectorTopFunction::Promote => write!(f, "promote"),
+        }
+    }
+}
+// (input).vcvtop_(half)_(output)_(signed)_(is_zero)
+#[derive(Clone, Debug)]
+pub struct VectorShapeTopOperation {
+    input: VectorShape,
+    half: HalfType,
+    output: VectorShape,
+    sign: SignType,
+    func: VectorTopFunction,
+    is_zero: bool,
+}
+impl VectorShapeTopOperation {
+    pub fn new(
+        input: impl Into<VectorShape>,
+        half: HalfType,
+        output: impl Into<VectorShape>,
+        sign: SignType,
+        func: VectorTopFunction,
+        is_zero: bool,
+    ) -> Self {
+        Self {
+            input: input.into(),
+            half,
+            output: output.into(),
+            sign,
+            func,
+            is_zero,
+        }
+    }
+}
+impl std::fmt::Display for VectorShapeTopOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.is_zero {
+            true => write!(
+                f,
+                "{}.{}_{}_{}_{}_zero",
+                self.input, self.func, self.half, self.output, self.sign
+            ),
+            false => write!(
+                f,
+                "{}.{}_{}_{}_{}",
+                self.input, self.func, self.half, self.output, self.sign
+            ),
+        }
+    }
+}
+impl ValidateInstruction for VectorShapeTopOperation {
     // type Output = [ValueType; 1];
     fn validate(&self, _: &mut Context, inputs: &mut Input) -> ValidateResult<Vec<ValueType>> {
         Ok(vec![ValueType::VecType(inputs.pop()?.try_into_vec_type()?)])
     }
 }
 
-// (ishape).narrow_(ipshape)_(sx)
+// (input).narrow_(output)_(sx)
 // First ishape is _op_shape
+#[derive(Clone, Debug)]
 pub struct VectorShapeNarrowOperation {
-    _op_shape: IntegerVectorShape,
-    _desired_shape: IntegerVectorShape,
-    _desired_sign: SignType,
+    input: IntegerVectorShape,
+    output: IntegerVectorShape,
+    sign: SignType,
+}
+
+impl VectorShapeNarrowOperation {
+    pub fn new(input: IntegerVectorShape, output: IntegerVectorShape, sign: SignType) -> Self {
+        Self {
+            input,
+            output,
+            sign,
+        }
+    }
+}
+impl std::fmt::Display for VectorShapeNarrowOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.narrow_{}_{}", self.input, self.output, self.sign)
+    }
 }
 impl ValidateInstruction for VectorShapeNarrowOperation {
     // type Output = [ValueType; 1];
@@ -1339,8 +2022,20 @@ impl ValidateInstruction for VectorShapeNarrowOperation {
 }
 
 // (ishape).bitmask
+#[derive(Clone, Debug)]
 pub struct VectorShapeBitMaskOperation {
-    _shape: IntegerVectorShape,
+    shape: IntegerVectorShape,
+}
+
+impl VectorShapeBitMaskOperation {
+    pub fn new(shape: IntegerVectorShape) -> Self {
+        Self { shape }
+    }
+}
+impl std::fmt::Display for VectorShapeBitMaskOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.bitmask", self.shape)
+    }
 }
 impl ValidateInstruction for VectorShapeBitMaskOperation {
     // type Output = [ValueType; 1];
@@ -1351,6 +2046,7 @@ impl ValidateInstruction for VectorShapeBitMaskOperation {
 }
 
 // (ishape).dot_(ishape)_s
+#[derive(Clone, Debug)]
 pub struct VectorShapeDotProductOperation {
     _op_shape: IntegerVectorShape,
     _desired_shape: IntegerVectorShape,
@@ -1365,6 +2061,7 @@ impl ValidateInstruction for VectorShapeDotProductOperation {
 }
 
 // (ishape).extmul_(half)_(ishape)_(sx)
+#[derive(Clone, Debug)]
 pub struct VectorShapeExtendMultiplyOperation {
     _op_shape: IntegerVectorShape,
     _desired_shape: IntegerVectorShape,
@@ -1381,6 +2078,7 @@ impl ValidateInstruction for VectorShapeExtendMultiplyOperation {
 }
 
 // (ishape).extadd_pairwise_(ishape)_(sx)
+#[derive(Clone, Debug)]
 pub struct VectorShapeExtendAddPairWiseOperation {
     _op_shape: IntegerVectorShape,
     _desired_shape: IntegerVectorShape,
@@ -1960,6 +2658,129 @@ impl ValidateInstruction for LoadNMemoryOperation {
         } else {
             Err(ValidationError::new())
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct LoadVectorMemoryOperation {
+    // This is more for me, 99% of the time this is supposed to be None, as described
+    // in the spec.
+    _memory: Option<MemoryIndex>,
+    vector: Option<VectorMemoryOp>,
+    args: MemoryArgument,
+    lane: Option<LaneIndex>,
+}
+impl LoadVectorMemoryOperation {
+    pub fn new(vector: VectorMemoryOp, args: MemoryArgument) -> Self {
+        Self {
+            vector: Some(vector),
+            args,
+            _memory: None,
+            lane: None,
+        }
+    }
+
+    pub fn lane(vector: VectorMemoryOp, args: MemoryArgument, lane: LaneIndex) -> Self {
+        Self {
+            _memory: None,
+            lane: Some(lane),
+            vector: Some(vector),
+            args,
+        }
+    }
+
+    pub fn load(args: MemoryArgument) -> Self {
+        Self {
+            _memory: None,
+            vector: None,
+            args,
+            lane: None,
+        }
+    }
+}
+impl std::fmt::Display for LoadVectorMemoryOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.vector {
+            Some(vector) => write!(f, "(v128.load{} {})", vector, self.args),
+            None => write!(f, "(v128.load {})", self.args),
+        }?;
+        if let Some(lane) = self.lane.as_ref() {
+            write!(f, " {}", lane)?;
+        }
+        Ok(())
+    }
+}
+impl ValidateInstruction for LoadVectorMemoryOperation {
+    // type Output = [ValueType; 1];
+    fn validate(&self, _: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
+        todo!("fix vector memory load")
+        // let _memory = ctx.get_memory(self.memory.map(Index::Index).as_ref())?;
+        // let bit_width = self.vector.bit_width();
+        // let alignment = 2_u32.pow(self.args.align());
+        // if alignment <= (bit_width / 8) {
+        //     inputs.pop()?.try_into_num()?.try_into_i32()?;
+        //     Ok(vec![ValueType::from(self.ty)])
+        // } else {
+        //     Err(ValidationError::new())
+        // }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct StoreVectorMemoryOperation {
+    // This is more for me, 99% of the time this is supposed to be None, as described
+    // in the spec.
+    args: MemoryArgument,
+    _memory: Option<MemoryIndex>,
+    vector: Option<VectorMemoryOp>,
+    lane: Option<LaneIndex>,
+}
+impl StoreVectorMemoryOperation {
+    pub fn lane(vector: VectorMemoryOp, args: MemoryArgument, lane: LaneIndex) -> Self {
+        Self {
+            _memory: None,
+            lane: Some(lane),
+            vector: Some(vector),
+            args,
+        }
+    }
+
+    pub fn load(args: MemoryArgument) -> Self {
+        Self {
+            _memory: None,
+            vector: None,
+            args,
+            lane: None,
+        }
+    }
+}
+impl std::fmt::Display for StoreVectorMemoryOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.vector {
+            Some(vector) => write!(
+                f,
+                "(v128.store{}_lane {} {})",
+                vector,
+                self.args,
+                self.lane.as_ref().unwrap()
+            ),
+            None => write!(f, "(v128.store {})", self.args),
+        }
+    }
+}
+impl ValidateInstruction for StoreVectorMemoryOperation {
+    // type Output = [ValueType; 1];
+    fn validate(&self, _: &mut Context, _: &mut Input) -> ValidateResult<Vec<ValueType>> {
+        todo!("fix vector memory store")
+        // let _memory = ctx.get_memory(self.memory.map(Index::Index).as_ref())?;
+        // let bit_width = self.vector.bit_width();
+        // let alignment = 2_u32.pow(self.args.align());
+        // if alignment <= (bit_width / 8) {
+        //     inputs.pop()?.try_into_num()?.try_into_i32()?;
+        //     Ok(vec![ValueType::from(self.ty)])
+        // } else {
+        //     Err(ValidationError::new())
+        // }
     }
 }
 

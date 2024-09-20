@@ -39,6 +39,14 @@ pub enum HalfType {
     Low,
     High,
 }
+impl std::fmt::Display for HalfType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Low => write!(f, "low"),
+            Self::High => write!(f, "high"),
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub enum BlockType {
@@ -386,6 +394,15 @@ impl MemoryZeroWidth {
         match self {
             MemoryZeroWidth::I32 => 32,
             MemoryZeroWidth::I64 => 64,
+        }
+    }
+}
+
+impl std::fmt::Display for MemoryZeroWidth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MemoryZeroWidth::I32 => write!(f, "32"),
+            MemoryZeroWidth::I64 => write!(f, "64"),
         }
     }
 }
@@ -1028,21 +1045,55 @@ impl std::fmt::Display for VecType {
         write!(f, "v128")
     }
 }
+
 // TODO(Alec): Implement all the permutations of VecType. Because the value
 // is "transparent"
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VectorMemoryOp {
-    I8x8,
-    I16x4,
-    I32x2,
+    I8x8(SignType),
+    I16x4(SignType),
+    I32x2(SignType),
+    Splat(MemoryWidth),
+    Zero(MemoryZeroWidth),
+    Lane(MemoryWidth),
+}
+impl std::fmt::Display for VectorMemoryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VectorMemoryOp::I8x8(sign) => write!(f, "8x8_{}", sign),
+            VectorMemoryOp::I16x4(sign) => write!(f, "16x4_{}", sign),
+            VectorMemoryOp::I32x2(sign) => write!(f, "32x2_{}", sign),
+            VectorMemoryOp::Splat(width) => write!(f, "{}_splat", width),
+            VectorMemoryOp::Zero(width) => write!(f, "{}_zero", width),
+            VectorMemoryOp::Lane(width) => write!(f, "{}_lane", width),
+        }
+    }
 }
 
 impl VectorMemoryOp {
     pub fn bit_width(&self) -> u32 {
         match self {
-            VectorMemoryOp::I8x8 => 8 / (8 * 8),
-            VectorMemoryOp::I16x4 => 16 / (8 * 4),
-            VectorMemoryOp::I32x2 => 32 / (8 * 2),
+            VectorMemoryOp::I8x8(_) => 8 / (8 * 8),
+            VectorMemoryOp::I16x4(_) => 16 / (8 * 4),
+            VectorMemoryOp::I32x2(_) => 32 / (8 * 2),
+            // TODO(Alec): This...probably isn't right
+            _ => panic!(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AllVectorShape {
+    V128,
+    Int(IntegerVectorShape),
+    Float(FloatVectorShape),
+}
+impl std::fmt::Display for AllVectorShape {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::V128 => write!(f, "v128"),
+            Self::Int(integer_vector_shape) => write!(f, "{}", integer_vector_shape),
+            Self::Float(float_vector_shape) => write!(f, "{}", float_vector_shape),
         }
     }
 }
@@ -1052,6 +1103,24 @@ pub enum VectorShape {
     Int(IntegerVectorShape),
     Float(FloatVectorShape),
 }
+impl std::fmt::Display for VectorShape {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VectorShape::Int(integer_vector_shape) => write!(f, "{}", integer_vector_shape),
+            VectorShape::Float(float_vector_shape) => write!(f, "{}", float_vector_shape),
+        }
+    }
+}
+impl From<IntegerVectorShape> for VectorShape {
+    fn from(value: IntegerVectorShape) -> Self {
+        Self::Int(value)
+    }
+}
+impl From<FloatVectorShape> for VectorShape {
+    fn from(value: FloatVectorShape) -> Self {
+        Self::Float(value)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IntegerVectorShape {
@@ -1060,11 +1129,29 @@ pub enum IntegerVectorShape {
     I32x4,
     I64x2,
 }
+impl std::fmt::Display for IntegerVectorShape {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IntegerVectorShape::I8x16 => write!(f, "i8x16"),
+            IntegerVectorShape::I16x8 => write!(f, "i16x8"),
+            IntegerVectorShape::I32x4 => write!(f, "i32x4"),
+            IntegerVectorShape::I64x2 => write!(f, "i64x2"),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FloatVectorShape {
     F32x4,
     F64x2,
+}
+impl std::fmt::Display for FloatVectorShape {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FloatVectorShape::F32x4 => write!(f, "f32x4"),
+            FloatVectorShape::F64x2 => write!(f, "f64x2"),
+        }
+    }
 }
 
 pub type Boolean = i32;
