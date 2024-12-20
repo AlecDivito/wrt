@@ -1,15 +1,9 @@
-use crate::{
-    structure::types::{NumType, SignType},
-    validation::instruction::Execute,
-};
-
-use super::{Number, Trap};
-
 pub enum Bool {
     True,
     False,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IntType {
     I32,
     I64,

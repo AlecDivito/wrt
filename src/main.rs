@@ -1,12 +1,22 @@
-use std::{fs, os::unix::ffi::OsStrExt, path::PathBuf};
+use std::{
+    convert::TryFrom,
+    fs,
+    io::{stdin, stdout, BufRead, Read},
+    os::unix::ffi::OsStrExt,
+    path::PathBuf,
+};
 
 use clap::{Parser, Subcommand};
 use wrt::{
-    parse::{
+    ast::tree::{ast, parse, print_tee_with_indentation},
+    execution::{
+        instance::{Instance, Value},
+        Store,
+    },
+    lex::{
         ast::{parse_test_block, TestBlock},
         tokenize, Token,
     },
-    validation::{Context, Input, ValidateInstruction},
 };
 
 #[derive(Parser)]
@@ -22,6 +32,7 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     Test(Tests),
+    Repl,
 }
 
 #[derive(Parser)]
@@ -181,23 +192,202 @@ impl Options {
     }
 
     pub fn test_validate(&self, blocks: &[TestBlock]) -> Result<(), Box<dyn std::error::Error>> {
-        let mut last_module = None;
-        for block in blocks.iter() {
-            match (block, last_module) {
-                (TestBlock::Module(module), _) => {
-                    last_module = Some(module);
-                    let mut ctx = Context::default();
-                    let mut inputs = Input::default();
-                    module.validate(&mut ctx, &mut inputs)?;
-                }
-                (TestBlock::AssertMalformed(module), _) => module.test()?,
-                (TestBlock::AssertInvalid(module), _) => module.test()?,
-                (TestBlock::AssertReturn(module), Some(last)) => module.test(last)?,
-                (TestBlock::AssertTrap(module), Some(last)) => module.test(last)?,
-                _ => panic!("THis shouldn't happen"),
-            }
-        }
+        // let mut last_module = None;
+        // for block in blocks.iter() {
+        //     match (block/* , last_module */) {
+        //         // (TestBlock::Module(module), _) => {
+        //         //     last_module = Some(module);
+        //         //     let mut ctx = Context::default();
+        //         //     let mut inputs = Input::default();
+        //         //     module.validate(&mut ctx, &mut inputs)?;
+        //         // }
+        //         // (TestBlock::AssertMalformed(module), _) => module.test()?,
+        //         // (TestBlock::AssertInvalid(module), _) => module.test()?,
+        //         // (TestBlock::AssertReturn(module), Some(last)) => module.test(last)?,
+        //         // (TestBlock::AssertTrap(module), Some(last)) => module.test(last)?,
+        //         _ => panic!("THis shouldn't happen"),
+        //     }
+        // }
         Ok(())
+    }
+
+    pub fn stdin(&self) {}
+}
+
+fn repl() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .create(true)
+        .truncate(false)
+        .append(true)
+        .open(".history")?;
+
+    let mut buffer = String::new();
+    file.read_to_string(&mut buffer)?;
+    let mut history = buffer
+        .split("---\n")
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>();
+
+    let stdout = stdout();
+    let stdin = stdin();
+    let mut full_buffer = String::new();
+
+    let mut indentation = 0;
+
+    loop {
+        buffer.clear();
+
+        let mut lock: std::io::StdoutLock<'_> = stdout.lock();
+        lock.write_all(format!("{}> ", "..".repeat(indentation)).as_bytes())?;
+        lock.flush()?;
+        drop(lock);
+
+        let mut lock = stdin.lock();
+        lock.read_line(&mut buffer)?;
+        drop(lock);
+
+        match buffer.trim().split(" ").next() {
+            Some(".exit") => return Ok(()),
+            Some(".buffer") => {
+                let mut lock: std::io::StdoutLock<'_> = stdout.lock();
+                lock.write_all(format!("{}\n", full_buffer).as_bytes())?;
+                lock.flush()?;
+                drop(lock);
+            }
+            Some(".tokens") => {
+                let default = "".to_string();
+                let program = if !full_buffer.is_empty() {
+                    &full_buffer
+                } else if let Some(token) = buffer.trim().split(" ").skip(1).next() {
+                    if let Ok(index) = token.parse::<usize>() {
+                        history.get(index).unwrap_or(&default)
+                    } else {
+                        &default
+                    }
+                } else if let Some(program) = history.last() {
+                    program
+                } else {
+                    &default
+                };
+                let tokens = tokenize(program)?;
+                let mut lock: std::io::StdoutLock<'_> = stdout.lock();
+                for (index, item) in tokens.iter().enumerate() {
+                    lock.write_all(format!("[{}]\t{}\n", index, item).as_bytes())?;
+                }
+                lock.write_all(b"\n".as_slice())?;
+                lock.flush()?;
+                drop(lock);
+            }
+            Some(".nodes") => {
+                let program = if let Some(token) = buffer.trim().split(" ").skip(1).next() {
+                    if let Ok(index) = token.parse::<usize>() {
+                        history.get(index)
+                    } else {
+                        history.last()
+                    }
+                } else {
+                    history.last()
+                };
+
+                if let Some(program) = program {
+                    let tokens = tokenize(program)?;
+                    let mut iter = tokens.iter().peekable();
+                    let node = parse(&mut iter)?;
+                    let mut lock: std::io::StdoutLock<'_> = stdout.lock();
+                    print_tee_with_indentation(&mut lock, &node, indentation + 1, false)?;
+                    lock.flush()?;
+                    drop(lock);
+                } else {
+                    println!("No Nodes currently exist!");
+                }
+            }
+            Some(".history") => {
+                let mut lock: std::io::StdoutLock<'_> = stdout.lock();
+                for (index, item) in history.iter().enumerate() {
+                    let programs = format!("[{}] {}\n", index, item.replace("\n", "\n    "));
+                    lock.write_all(programs.as_bytes())?;
+                }
+                lock.write_all(b"\n")?;
+                lock.flush()?;
+                drop(lock);
+            }
+            Some(".delete") => {
+                let mut iter = buffer.trim().split(" ");
+                let _ = iter.next();
+                if let Some(func) = iter.next() {
+                    if let Ok(index) = func.parse::<usize>() {
+                        history.remove(index);
+
+                        drop(file);
+                        file = std::fs::OpenOptions::new()
+                            .truncate(true)
+                            .write(true)
+                            .open(".history")?;
+
+                        file.write_all(history.join("\n---\n").as_bytes())?;
+                        full_buffer.clear();
+                    }
+                }
+            }
+            Some(".call") => {
+                let mut iter = buffer.trim().split(" ").skip(1);
+                let program = if let Some(token) = iter.next() {
+                    if let Ok(index) = token.parse::<usize>() {
+                        history.get(index)
+                    } else {
+                        history.last()
+                    }
+                } else {
+                    history.last()
+                };
+
+                if let Some(program) = program {
+                    use std::convert::TryFrom;
+
+                    let tokens = tokenize(program)?;
+                    let mut iter = tokens.iter().peekable();
+                    let nodes = parse(&mut iter)?;
+                    let tree = ast(&nodes)?;
+                    let module = tree.as_module().unwrap();
+                    // let module = module_node.validate();
+                    // let store = Store::new();
+                    let instance = Instance::new(module);
+                    // let instance = module.instance(&mut store)?;
+                    let values = iter.map(|s| s.source()).collect::<Vec<_>>();
+                    let mut iter = values.iter();
+                    let returned = if let Some(func) = iter.next() {
+                        instance.call(func, values.as_slice())
+                    } else {
+                        instance.call("main", values.as_slice())
+                    };
+                    println!("{:?}", returned);
+                }
+            }
+            Some(_) => {
+                full_buffer.push_str(&format!("\n{}{}", "  ".repeat(indentation), buffer.trim()));
+                let tks = tokenize(&full_buffer)?;
+
+                let left_parenthes = tks.iter().filter(|t| t.ty().is_left_paren()).count();
+                let right_parenthes = tks.iter().filter(|t| t.ty().is_right_paren()).count();
+
+                if right_parenthes > left_parenthes {
+                    indentation = 0;
+                } else {
+                    indentation = left_parenthes - right_parenthes;
+                }
+                if indentation == 0 {
+                    history.push(full_buffer.clone());
+                    file.write_all(b"\n---\n")?;
+                    file.write_all(full_buffer.as_bytes())?;
+                    full_buffer.clear();
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -205,6 +395,7 @@ fn main() {
     let cli = Cli::parse();
 
     if let Err(err) = match cli.command {
+        Commands::Repl => repl(),
         Commands::Test(test) => {
             let opts = Options {
                 directory: test.directory.clone(),

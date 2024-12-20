@@ -122,6 +122,6 @@
 // pub mod values;
 pub mod ast;
 pub mod execution;
-pub mod parse;
+pub mod lex;
 pub mod structure;
 pub mod validation;
